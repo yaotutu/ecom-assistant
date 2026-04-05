@@ -1,0 +1,24 @@
+{
+  "name": "taobao-finder-app",
+  "version": "1.0.0",
+  "description": "电商助手 — 多平台商品采集桌面工具",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.0",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

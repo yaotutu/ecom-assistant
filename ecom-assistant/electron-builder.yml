@@ -1,0 +1,9 @@
+appId: com.ecom.finder-app
+productName: 电商助手
+directories:
+  output: release
+mac:
+  category: public.app-category.utilities
+  target:
+    - dmg
+    - zip
