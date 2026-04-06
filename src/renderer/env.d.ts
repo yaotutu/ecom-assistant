@@ -1,11 +1,6 @@
 /// <reference types="vite/client" />
 
-declare module '*.vue' {
-  import type { DefineComponent } from 'vue'
-  const component: DefineComponent<{}, {}, any>
-  export default component
-}
-
+/** 连接检测结果 */
 interface ConnectionResult {
   status: 'checking' | 'connected' | 'disconnected' | 'error'
   message: string
@@ -13,6 +8,7 @@ interface ConnectionResult {
   detail?: string
 }
 
+/** 商品数据 */
 interface Product {
   title: string
   itemId: string
@@ -23,9 +19,13 @@ interface Product {
   link: string
 }
 
+/** 平台 API（由 preload 脚本注入） */
 interface PlatformAPI {
+  /** 检查平台连接状态 */
   checkConnection(): Promise<ConnectionResult>
+  /** 搜索 TOP 店铺 */
   searchStores(keyword: string, topN?: number): Promise<any>
+  /** 采集店铺全店商品 */
   collectStore(
     storeName: string,
     filterOptions: { minSales?: number; minPrice?: number; maxPrice?: number }
@@ -40,6 +40,7 @@ interface PlatformAPI {
     error?: string
     suggestion?: string
   }>
+  /** 导出文件 */
   export(
     storeName: string,
     products: any[],

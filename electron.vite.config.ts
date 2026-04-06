@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import vue from '@vitejs/plugin-vue'
+import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 export default defineConfig({
@@ -29,6 +29,6 @@ export default defineConfig({
         input: resolve('index.html'),
       },
     },
-    plugins: [vue()],
+    plugins: [react()],
   },
 })
