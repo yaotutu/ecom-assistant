@@ -10,6 +10,7 @@
  */
 import { execFile, exec } from 'node:child_process'
 import { readFile, unlink } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -68,15 +69,69 @@ function diagnose(error: Error): DiagnosticResult {
 
 // ─── CLI 二进制路径 ────────────────────────────────────────
 
-/** macOS 上 taobao-native 可能的路径（按优先级） */
+/**
+ * 获取 taobao-native CLI 的候选路径（按优先级）
+ *
+ * macOS: PATH 中的 taobao-native → Application Support 路径
+ * Windows: PATH 中的 taobao-native → install-location.txt 中记录的路径
+ */
 function getCliPaths(): string[] {
   const paths = ['taobao-native']
+
   if (process.platform === 'darwin') {
     paths.push(
       join(homedir(), 'Library/Application Support/taobao/cli/taobao-runner')
     )
   }
+
+  if (process.platform === 'win32') {
+    // Windows: 从 %APPDATA%\taobao\install-location.txt 读取安装目录
+    const appdata = process.env.APPDATA || ''
+    if (appdata) {
+      const locationFile = join(appdata, 'taobao', 'install-location.txt')
+      try {
+        if (existsSync(locationFile)) {
+          const installDir = readFileSync(locationFile, 'utf-8').trim()
+          if (installDir) {
+            paths.push(join(installDir, 'bin', 'taobao-native.cmd'))
+          }
+        }
+      } catch {
+        // 读取失败，跳过
+      }
+    }
+  }
+
   return paths
+}
+
+// ─── 路径回退通用逻辑 ──────────────────────────────────────
+
+/**
+ * 按顺序尝试多个 CLI 路径，只在 ENOENT（命令不存在）时回退到下一个路径
+ * 其他错误（如执行层未就绪）直接抛出
+ */
+async function tryPathsUntil<T>(
+  paths: string[],
+  fn: (cliPath: string) => Promise<T>
+): Promise<T> {
+  let lastError: Error | null = null
+
+  for (const p of paths) {
+    try {
+      return await fn(p)
+    } catch (err) {
+      lastError = err as Error
+      if (!/ENOENT|not found|spawn/i.test(lastError.message)) {
+        break
+      }
+    }
+  }
+
+  const diag = diagnose(lastError!)
+  const err = new Error(diag.userMessage)
+  ;(err as any).suggestion = diag.suggestion
+  throw err
 }
 
 // ─── 核心执行函数 ──────────────────────────────────────────
@@ -101,25 +156,9 @@ export class NativeCli {
     const argArray = [tool, '--args', JSON.stringify(mergedArgs)]
     if (outputFile) argArray.push('-o', outputFile)
 
-    let lastError: Error | null = null
-
-    for (const cliPath of this.cliPaths) {
-      try {
-        return await this._execOnce(cliPath, argArray, outputFile)
-      } catch (err) {
-        lastError = err as Error
-        // 只在"命令不存在"时尝试下一个路径
-        if (!/ENOENT|not found|spawn/i.test(lastError.message)) {
-          break
-        }
-      }
-    }
-
-    // 所有路径都失败了
-    const diag = diagnose(lastError!)
-    const err = new Error(diag.userMessage)
-    ;(err as any).suggestion = diag.suggestion
-    throw err
+    return tryPathsUntil(this.cliPaths, (cliPath) =>
+      this._execOnce(cliPath, argArray, outputFile)
+    )
   }
 
   private _execOnce(
@@ -134,10 +173,8 @@ export class NativeCli {
         { timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
         async (error, stdout) => {
           if (error) {
-            const diag = diagnose(error)
-            const err = new Error(diag.userMessage)
-            ;(err as any).suggestion = diag.suggestion
-            reject(err)
+            // 保留原始 error，让 exec() 的路径回退逻辑能根据 ENOENT 正确判断
+            reject(error)
             return
           }
 
@@ -274,9 +311,10 @@ export class NativeCli {
     suggestion?: string
     latencyMs?: number
   }> {
-    // 杀掉旧进程
+    // 杀掉旧进程（通过 lsof + kill 精确定位，避免 pkill 误杀）
     if (process.platform === 'darwin') {
-      exec('pkill -f "淘宝桌面版.app"')
+      // 使用 osascript 安全退出 macOS 应用
+      exec('osascript -e \'quit app "淘宝桌面版"\'')
     } else {
       exec('taskkill /F /IM "淘宝桌面版.exe"')
     }
@@ -312,35 +350,18 @@ export class NativeCli {
     }
   }
 
-  /** 执行 --help 检测 CLI 是否存在（不需要执行层就绪） */
+  /** 执行 --help 检测 CLI 是否存在（不需要执行层就绪），自动尝试所有路径 */
   private execHelp(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const cmd = this.cliPaths[0]
-      execFile(
-        cmd,
-        ['--help'],
-        { timeout: 10_000 },
-        (error) => {
-          if (error) {
-            if (this.cliPaths.length > 1) {
-              execFile(
-                this.cliPaths[1],
-                ['--help'],
-                { timeout: 10_000 },
-                (err2) => {
-                  if (err2) reject(err2)
-                  else resolve()
-                }
-              )
-            } else {
-              reject(error)
-            }
-            return
-          }
-          resolve()
-        }
-      )
-    })
+    return tryPathsUntil(
+      this.cliPaths,
+      (cliPath) =>
+        new Promise((resolve, reject) => {
+          execFile(cliPath, ['--help'], { timeout: 10_000 }, (error) => {
+            if (error) reject(error)
+            else resolve(undefined)
+          })
+        })
+    )
   }
 
   // ─── 工具方法 ─────────────────────────────────────────
