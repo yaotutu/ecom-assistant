@@ -1,40 +1,30 @@
 /**
- * 店铺搜索逻辑
- * 翻译自 Python search_top_stores.py
+ * 店铺搜索逻辑 — 从搜索结果中提取去重后的店铺列表
  */
 import type { StoreInfo, SearchStoresResult } from '../../core/types'
 
-/** 从 API 数据中提取店铺统计（跳过天猫） */
-export function extractStoresFromApi(apiData: any): Map<string, StoreInfo> {
+/**
+ * 从 API 搜索结果中提取去重店铺（保持首次出现顺序）
+ * 跳过天猫店铺
+ */
+export function extractStoresFromApi(apiData: any): StoreInfo[] {
   const r = apiData?.result ?? apiData
   const products: any[] = r?.products ?? []
 
-  const stores = new Map<string, StoreInfo>()
+  const seen = new Set<string>()
+  const stores: StoreInfo[] = []
 
   for (const p of products) {
     const shop: string = p.shopName ?? ''
     const url: string = p.productUrl ?? ''
-    if (url.includes('tmall.com') || !shop) continue
+    if (url.includes('tmall.com') || !shop || seen.has(shop)) continue
 
-    if (!stores.has(shop)) {
-      stores.set(shop, {
-        name: shop,
-        productCount: 0,
-        shopUrl: p.shopUrl ?? '',
-      })
-    }
-    stores.get(shop)!.productCount += 1
+    seen.add(shop)
+    stores.push({
+      name: shop,
+      shopUrl: p.shopUrl ?? '',
+    })
   }
 
   return stores
-}
-
-/** 按 API 统计的商品数量排序店铺 */
-export function rankStores(
-  storesMap: Map<string, StoreInfo>,
-  topN: number
-): StoreInfo[] {
-  return [...storesMap.values()]
-    .sort((a, b) => b.productCount - a.productCount)
-    .slice(0, topN)
 }

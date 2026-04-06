@@ -1,5 +1,10 @@
 /**
  * IPC 通道处理 — 连接渲染进程与淘宝平台
+ *
+ * 职责：
+ * 1. 注册 IPC handlers（请求-响应）
+ * 2. 启动心跳，监听连接状态变更并推送给渲染进程
+ * 3. 应用退出时清理心跳
  */
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { writeFileSync, mkdirSync } from 'fs'
@@ -10,25 +15,48 @@ import type { FilterOptions } from '../core/types'
 
 const IPC = {
   CHECK_CONNECTION: 'platform:check-connection',
+  CONNECTION_STATUS: 'platform:connection-status',
   SEARCH_STORES: 'platform:search-stores',
   COLLECT_STORE: 'platform:collect-store',
   EXPORT: 'platform:export',
 } as const
 
-export function registerIpcHandlers(_win: BrowserWindow) {
-  const platform = new TaobaoPlatform()
+/** 模块级引用，供状态推送和清理使用 */
+let platform: TaobaoPlatform
+let win: BrowserWindow
 
-  // ─── 连接检查 ──────────────────────────────────
+export function registerIpcHandlers(mainWindow: BrowserWindow) {
+  win = mainWindow
+  platform = new TaobaoPlatform()
+  const cli = platform.nativeCli
+
+  // ─── 启动心跳 + 监听状态变更 ────────────────────
+  cli.startHeartbeat()
+  cli.onStateChange((change) => {
+    // 推送连接状态到渲染进程
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.CONNECTION_STATUS, {
+        status: change.state === 'healthy' ? 'connected'
+          : change.state === 'recovering' ? 'checking'
+          : change.state === 'unknown' ? 'checking'
+          : 'disconnected',
+        message: change.message,
+        suggestion: change.suggestion,
+      })
+    }
+  })
+
+  // ─── 连接检查（手动触发，保留作为 fallback） ──────
   ipcMain.handle(IPC.CHECK_CONNECTION, async () => {
     return platform.checkConnection()
   })
 
-  // ─── 搜索 TOP 店铺 ──────────────────────────────
+  // ─── 搜索店铺 ──────────────────────────────────
   ipcMain.handle(
     IPC.SEARCH_STORES,
-    async (_event, keyword: string, topN = 3) => {
+    async (_event, keyword: string) => {
       try {
-        const result = await platform.searchStores(keyword, { top: topN })
+        const result = await platform.searchStores(keyword)
         return { success: true, data: result }
       } catch (err: any) {
         return { success: false, error: err.message }
@@ -60,7 +88,7 @@ export function registerIpcHandlers(_win: BrowserWindow) {
       format: 'detail' | 'links'
     ) => {
       try {
-        const { canceled, filePaths } = await dialog.showOpenDialog(_win, {
+        const { canceled, filePaths } = await dialog.showOpenDialog(win, {
           title: '选择导出目录',
           properties: ['openDirectory', 'createDirectory'],
         })
@@ -92,4 +120,9 @@ export function registerIpcHandlers(_win: BrowserWindow) {
       }
     }
   )
+}
+
+/** 应用退出时清理心跳 */
+export function cleanupIpcHandlers(): void {
+  platform?.nativeCli.stopHeartbeat()
 }

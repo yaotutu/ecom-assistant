@@ -1,18 +1,16 @@
 import { useState } from 'react'
-import { Card, Input, InputNumber, Button, Table, Space, message, Empty, Tag } from 'antd'
+import { Card, Input, Button, Table, Space, message, Empty, Tag } from 'antd'
 import { SearchOutlined, ShopOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 
 interface StoreRow {
   name: string
-  productCount: number
   shopUrl: string
 }
 
-/** Tab2: 店铺发现 — 输入关键字，搜索最热门的店铺 */
+/** Tab2: 店铺发现 — 输入关键字，搜索相关店铺 */
 const StoreDiscover = () => {
   const [keyword, setKeyword] = useState('')
-  const [topN, setTopN] = useState(10)
   const [loading, setLoading] = useState(false)
   const [stores, setStores] = useState<StoreRow[]>([])
   const [hasSearched, setHasSearched] = useState(false)
@@ -26,7 +24,7 @@ const StoreDiscover = () => {
     const hide = message.loading(`正在搜索「${keyword.trim()}」相关店铺...`, 0)
 
     try {
-      const res = await window.platformAPI.searchStores(keyword.trim(), topN)
+      const res = await window.platformAPI.searchStores(keyword.trim())
       hide()
       setLoading(false)
       setHasSearched(true)
@@ -50,9 +48,7 @@ const StoreDiscover = () => {
     {
       title: '#',
       width: 48,
-      render: (_, __, i) => (
-        <Tag color="blue" style={{ borderRadius: '50%' }}>{i + 1}</Tag>
-      ),
+      render: (_, __, i) => i + 1,
     },
     {
       title: '店铺名称',
@@ -60,27 +56,20 @@ const StoreDiscover = () => {
       ellipsis: true,
     },
     {
-      title: '商品数',
-      dataIndex: 'productCount',
-      width: 100,
-    },
-    {
       title: '操作',
       width: 120,
       render: (_, r) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<ShopOutlined />}
-            onClick={() => {
-              // TODO: 跳转到店铺采集，或直接触发采集
-              message.info(`采集「${r.name}」功能待实现`)
-            }}
-          >
-            采集此店
-          </Button>
-        </Space>
+        <Button
+          type="link"
+          size="small"
+          icon={<ShopOutlined />}
+          onClick={() => {
+            // TODO: 跳转到店铺采集，或直接触发采集
+            message.info(`采集「${r.name}」功能待实现`)
+          }}
+        >
+          采集此店
+        </Button>
       ),
     },
   ]
@@ -99,13 +88,6 @@ const StoreDiscover = () => {
               onPressEnter={handleSearch}
               style={{ flex: 1 }}
             />
-          </div>
-
-          <div className="filters">
-            <Space>
-              <span className="filter-label">搜索数量 Top</span>
-              <InputNumber min={1} max={50} value={topN} onChange={v => setTopN(v ?? 10)} />
-            </Space>
           </div>
 
           <Space>

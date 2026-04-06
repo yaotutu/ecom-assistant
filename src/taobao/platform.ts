@@ -3,7 +3,7 @@
  * 组合 connection 层 + business 层
  */
 import { NativeCli } from './connection/native-cli'
-import { extractStoresFromApi, rankStores } from './business/store-search'
+import { extractStoresFromApi } from './business/store-search'
 import { extractSalesList } from './business/sales-parser'
 import { buildCollectResult } from './business/product-collector'
 import type {
@@ -21,6 +21,11 @@ export class TaobaoPlatform implements IPlatform {
 
   constructor() {
     this.cli = new NativeCli()
+  }
+
+  /** 暴露底层 CLI 实例（供 ipc-handlers 注册心跳监听器） */
+  get nativeCli(): NativeCli {
+    return this.cli
   }
 
   // ─── 连接管理（最核心） ───────────────────────────
@@ -65,23 +70,14 @@ export class TaobaoPlatform implements IPlatform {
     }
   }
 
-  // ─── 搜索 TOP 店铺 ──────────────────────────────
+  // ─── 搜索店铺 ──────────────────────────────────
 
-  async searchStores(
-    keyword: string,
-    options?: { top?: number }
-  ): Promise<SearchStoresResult> {
-    const topN = options?.top ?? 3
-    const { apiData } = await this.cli.searchAndWait(keyword, 'pc_taobao')
+  async searchStores(keyword: string): Promise<SearchStoresResult> {
+    // 使用 shop 类型搜索店铺（CLI 支持的搜索类型：all/shop/tmall/pc_taobao 等）
+    const { apiData } = await this.cli.searchAndWait(keyword, 'shop')
+    const stores = extractStoresFromApi(apiData)
 
-    const storesMap = extractStoresFromApi(apiData)
-    const ranked = rankStores(storesMap, topN)
-
-    return {
-      keyword,
-      totalStoresFound: storesMap.size,
-      stores: ranked,
-    }
+    return { keyword, stores }
   }
 
   // ─── 采集全店商品 ──────────────────────────────

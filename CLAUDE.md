@@ -28,7 +28,7 @@ npm run typecheck    # TypeScript 类型检查（tsc --noEmit）
 src/
 ├── main/                    # 主进程（Node.js）
 │   ├── main.ts              # 窗口创建、应用生命周期
-│   └── ipc-handlers.ts      # IPC 通道注册，桥接渲染进程与平台模块
+│   └── ipc-handlers.ts      # IPC 通道注册 + 心跳启动 + 状态推送 + 退出清理
 ├── preload/                 # 预加载脚本（安全沙箱桥接）
 │   └── preload.ts           # contextBridge 暴露 window.platformAPI
 ├── renderer/                # 渲染进程（React 19 SPA）
@@ -48,7 +48,7 @@ src/
     ├── connection/
     │   └── native-cli.ts    # NativeCli 封装（调用 taobao-native CLI 二进制）
     └── business/            # 纯函数层，无副作用，无状态
-        ├── store-search.ts        # 店铺搜索与排名
+        ├── store-search.ts        # 店铺搜索结果提取（去重，保持原始顺序）
         ├── product-collector.ts   # 商品合并、过滤
         ├── sales-parser.ts        # 销量文本解析
         └── data-formatter.ts      # 导出文本格式化
@@ -57,18 +57,42 @@ src/
 ### 核心数据流
 
 1. **渲染进程** (App.tsx → tabs/*.tsx) 通过 `window.platformAPI.*` 调用 IPC
-2. **IPC Handlers** 接收请求，委托给 `TaobaoPlatform`
-3. **TaobaoPlatform** 组合 connection 层（NativeCli）和 business 层（纯函数）
-4. **NativeCli** 通过 `execFile` 调用本地 CLI 二进制，解析 JSON 输出
+2. **IPC Handlers** 接收请求，委托给 `TaobaoPlatform`；同时启动心跳循环，通过 `webContents.send()` 推送连接状态
+3. **TaobaoPlatform** 组合 connection 层（NativeCli）和 business 层（纯函数），暴露 `nativeCli` getter 供心跳使用
+4. **NativeCli** 管理心跳状态机、自动恢复、恢复等待队列，通过 `execFile` 调用本地 CLI 二进制
 
 ### IPC API（window.platformAPI）
 
 | 方法 | 说明 |
 |------|------|
-| `checkConnection()` | 连接健康检查 |
-| `searchStores(keyword, topN)` | 搜索 TOP 店铺 |
+| `onConnectionChange(callback)` | 订阅心跳推送的连接状态变更（返回取消订阅函数） |
+| `checkConnection()` | 手动检查连接（fallback，心跳已自动推送状态） |
+| `searchStores(keyword)` | 搜索店铺（返回 CLI 原始顺序，不做排序） |
 | `collectStore(storeName, filterOptions)` | 采集全店商品 |
 | `export(storeName, products, filterOptions, format)` | 导出文件 |
+
+### 心跳机制 + 自动恢复
+
+连接管理作为基础设施层，业务层不感知连接状态：
+
+```
+NativeCli 心跳循环（30s）:
+  heartbeatTick()
+    ├── ping 成功 → connState = healthy → IPC 推送给渲染进程
+    └── ping 失败 → connState = recovering → 自动重启淘宝桌面版
+                    ├── 重启成功 → healthy → IPC 推送
+                    └── 重启失败 → connState = dead → IPC 推送，提示用户手动处理
+
+业务调用（exec()）:
+  ├── healthy → 直接执行
+  ├── recovering → 等待恢复（最多 60s），恢复后执行
+  └── dead → 直接拒绝，提示用户先处理连接
+```
+
+状态映射（NativeCli → 渲染进程）：
+- `healthy` → `connected`
+- `recovering` / `unknown` → `checking`
+- `dead` → `disconnected`
 
 ### IPlatform 接口
 
@@ -81,8 +105,11 @@ src/
 - Windows 路径：`taobao-native`（PATH）→ `%APPDATA%\taobao\install-location.txt` 中读取安装目录拼接 `bin\taobao-native.cmd`
 - 只在 ENOENT（命令不存在）时回退到下一个路径，其他错误直接抛出
 - `_execOnce` 保留原始 Error，不做 `diagnose()` 转换，确保回退逻辑正确匹配 ENOENT
-- 执行层未就绪时自动重启桌面版（macOS 用 `osascript quit`，Windows 用 `taskkill`）
 - 所有 CLI 调用有 120 秒超时，输出通过临时 JSON 文件或 stdout 传递
+- **心跳机制**：`startHeartbeat(30_000)` 每 30 秒 ping 一次，崩溃后 `attemptRecovery()` 自动重启
+- **状态机**：`unknown` → `healthy` / `recovering` → `healthy` / `dead`
+- **恢复等待队列**：`exec()` 在 recovering 状态下等待恢复（最多 60s），恢复后自动继续执行
+- `onStateChange(cb)` 供 IPC 层订阅状态变更，`stopHeartbeat()` 供应用退出时清理
 
 ## 技术栈
 

@@ -1,12 +1,10 @@
 /**
  * 淘宝 native CLI 封装 — 连接层
  *
- * 这是整个工具链中最脆弱的环节，所有异常情况都要处理：
- * - taobao-native 命令不存在（未安装）
- * - 桌面版未启动
- * - 正在初始化（需要等待）
- * - 内测权限问题
- * - 连接超时
+ * 职责：
+ * 1. 封装 CLI 调用，处理路径回退
+ * 2. 心跳检测 — 定期探测连接存活，崩溃自动恢复
+ * 3. 业务层不感知连接问题 — exec() 在恢复中会自动等待
  */
 import { execFile, exec } from 'node:child_process'
 import { readFile, unlink } from 'node:fs/promises'
@@ -17,15 +15,29 @@ import { join } from 'node:path'
 const SOURCE_APP = 'copaw'
 const TIMEOUT_MS = 120_000
 const PAGE_SLEEP_MS = 2_000
+const HEARTBEAT_DEFAULT_MS = 30_000
+const WAIT_RECOVERY_TIMEOUT_MS = 60_000
 
-// ─── 错误诊断 ──────────────────────────────────────────────
+// ─── 连接状态 ───────────────────────────────────────────
+
+export type ConnState = 'healthy' | 'recovering' | 'dead' | 'unknown'
+
+export interface ConnStateChange {
+  state: ConnState
+  message: string
+  suggestion?: string
+  latencyMs?: number
+}
+
+type StateListener = (change: ConnStateChange) => void
+
+// ─── 错误诊断 ──────────────────────────────────────────
 
 interface DiagnosticResult {
   userMessage: string
   suggestion: string
 }
 
-/** 已知错误 → 用户友好提示 */
 const ERROR_DIAGNOSIS: Array<{ pattern: RegExp; result: DiagnosticResult }> = [
   {
     pattern: /ENOENT|not found|spawn/i,
@@ -67,14 +79,8 @@ function diagnose(error: Error): DiagnosticResult {
   }
 }
 
-// ─── CLI 二进制路径 ────────────────────────────────────────
+// ─── CLI 二进制路径 ────────────────────────────────────
 
-/**
- * 获取 taobao-native CLI 的候选路径（按优先级）
- *
- * macOS: PATH 中的 taobao-native → Application Support 路径
- * Windows: PATH 中的 taobao-native → install-location.txt 中记录的路径
- */
 function getCliPaths(): string[] {
   const paths = ['taobao-native']
 
@@ -85,7 +91,6 @@ function getCliPaths(): string[] {
   }
 
   if (process.platform === 'win32') {
-    // Windows: 从 %APPDATA%\taobao\install-location.txt 读取安装目录
     const appdata = process.env.APPDATA || ''
     if (appdata) {
       const locationFile = join(appdata, 'taobao', 'install-location.txt')
@@ -105,12 +110,8 @@ function getCliPaths(): string[] {
   return paths
 }
 
-// ─── 路径回退通用逻辑 ──────────────────────────────────────
+// ─── 路径回退 ──────────────────────────────────────────
 
-/**
- * 按顺序尝试多个 CLI 路径，只在 ENOENT（命令不存在）时回退到下一个路径
- * 其他错误（如执行层未就绪）直接抛出
- */
 async function tryPathsUntil<T>(
   paths: string[],
   fn: (cliPath: string) => Promise<T>
@@ -134,20 +135,84 @@ async function tryPathsUntil<T>(
   throw err
 }
 
-// ─── 核心执行函数 ──────────────────────────────────────────
+// ─── NativeCli 核心 ────────────────────────────────────
 
 export class NativeCli {
   private cliPaths: string[]
+
+  // ─── 连接状态管理 ──────────────────────────────────
+  private connState: ConnState = 'unknown'
+  private listeners = new Set<StateListener>()
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+  // 恢复中等待队列：业务 exec() 在 recovering 状态时挂起的 Promise
+  private recoveryResolvers: Array<{
+    resolve: () => void
+    reject: (err: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }> = []
 
   constructor() {
     this.cliPaths = getCliPaths()
   }
 
+  // ─── 心跳管理 ─────────────────────────────────────
+
+  /** 启动心跳循环（由主进程调用一次） */
+  startHeartbeat(intervalMs = HEARTBEAT_DEFAULT_MS): void {
+    this.stopHeartbeat()
+    // 首次立即检测一次
+    this.heartbeatTick()
+    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), intervalMs)
+  }
+
+  /** 停止心跳（应用退出时调用） */
+  stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
+  /** 订阅连接状态变更，返回取消订阅函数 */
+  onStateChange(cb: StateListener): () => void {
+    this.listeners.add(cb)
+    return () => { this.listeners.delete(cb) }
+  }
+
+  /** 获取当前连接状态 */
+  getState(): ConnState {
+    return this.connState
+  }
+
+  // ─── 核心执行（带状态感知） ────────────────────────
+
   /**
-   * 执行 taobao-native 命令
-   * 自动尝试所有可用路径
+   * 执行 CLI 命令
+   * - healthy → 直接执行
+   * - recovering → 等待恢复后执行（最多 60s）
+   * - dead → 直接拒绝
    */
   async exec(
+    tool: string,
+    args: Record<string, unknown>,
+    outputFile?: string
+  ): Promise<any> {
+    // 如果正在恢复中，等待恢复完成
+    if (this.connState === 'recovering') {
+      await this.waitForRecovery()
+    }
+
+    // dead 状态直接拒绝
+    if (this.connState === 'dead') {
+      throw new Error('淘宝桌面版连接已断开，请重启桌面版后重试')
+    }
+
+    return this.doExec(tool, args, outputFile)
+  }
+
+  /** 实际执行 CLI 命令（路径回退 + 错误诊断） */
+  private async doExec(
     tool: string,
     args: Record<string, unknown>,
     outputFile?: string
@@ -157,11 +222,11 @@ export class NativeCli {
     if (outputFile) argArray.push('-o', outputFile)
 
     return tryPathsUntil(this.cliPaths, (cliPath) =>
-      this._execOnce(cliPath, argArray, outputFile)
+      this.execOnce(cliPath, argArray, outputFile)
     )
   }
 
-  private _execOnce(
+  private execOnce(
     cmd: string,
     argArray: string[],
     outputFile?: string
@@ -173,12 +238,10 @@ export class NativeCli {
         { timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
         async (error, stdout) => {
           if (error) {
-            // 保留原始 error，让 exec() 的路径回退逻辑能根据 ENOENT 正确判断
             reject(error)
             return
           }
 
-          // 优先读 -o 输出文件
           if (outputFile) {
             try {
               const content = await readFile(outputFile, 'utf-8')
@@ -191,7 +254,6 @@ export class NativeCli {
             }
           }
 
-          // 从 stdout 解析
           try {
             resolve(JSON.parse(stdout))
           } catch {
@@ -202,7 +264,139 @@ export class NativeCli {
     })
   }
 
-  // ─── 高层 API ──────────────────────────────────────────
+  // ─── 心跳检测 ─────────────────────────────────────
+
+  /** 单次心跳：ping → 更新状态 → 自动恢复（如果需要） */
+  private async heartbeatTick(): Promise<void> {
+    try {
+      const start = Date.now()
+      await this.doExec('get_current_tab', {})
+      this.transitionTo('healthy', {
+        state: 'healthy',
+        message: `已连接淘宝桌面版 (${Date.now() - start}ms)`,
+        latencyMs: Date.now() - start,
+      })
+    } catch {
+      // 连接异常，尝试自动恢复
+      await this.attemptRecovery()
+    }
+  }
+
+  /** 尝试自动恢复淘宝桌面版 */
+  private async attemptRecovery(): Promise<void> {
+    this.transitionTo('recovering', {
+      state: 'recovering',
+      message: '检测到淘宝桌面版连接异常，正在自动重启...',
+    })
+
+    // 杀掉旧进程
+    if (process.platform === 'darwin') {
+      exec('osascript -e \'quit app "淘宝桌面版"\'')
+    } else {
+      exec('taskkill /F /IM "淘宝桌面版.exe"')
+    }
+    await sleep(3000)
+
+    // 重新打开
+    if (process.platform === 'darwin') {
+      exec('open -a "/Applications/淘宝桌面版.app"')
+    } else {
+      exec('start "" "淘宝桌面版"')
+    }
+
+    // 等待启动完成（最多 40 秒，每 5 秒检测一次）
+    for (let i = 0; i < 8; i++) {
+      await sleep(5000)
+      try {
+        const start = Date.now()
+        await this.doExec('get_current_tab', {})
+        this.transitionTo('healthy', {
+          state: 'healthy',
+          message: `已自动重连淘宝桌面版 (${Date.now() - start}ms)`,
+          latencyMs: Date.now() - start,
+        })
+        return
+      } catch {
+        // 继续等待
+      }
+    }
+
+    // 恢复失败
+    this.transitionTo('dead', {
+      state: 'dead',
+      message: '淘宝桌面版自动重启失败，请手动处理',
+      suggestion: '请手动打开淘宝桌面版并确认已登录，然后点击「重新检测」。',
+    })
+  }
+
+  // ─── 状态切换 & 通知 ──────────────────────────────
+
+  /** 切换连接状态并通知所有监听者 */
+  private transitionTo(state: ConnState, change: ConnStateChange): void {
+    const prev = this.connState
+    this.connState = state
+
+    // 状态变化时通知监听者
+    if (prev !== state) {
+      for (const cb of this.listeners) {
+        try { cb(change) } catch { /* 防止监听者异常 */ }
+      }
+
+      // 恢复成功时，唤醒所有等待中的业务调用
+      if (state === 'healthy' && prev === 'recovering') {
+        this.resolveRecoveryWaiters()
+      }
+
+      // 彻底失败时，拒绝所有等待中的业务调用
+      if (state === 'dead' && prev === 'recovering') {
+        this.rejectRecoveryWaiters()
+      }
+    }
+  }
+
+  // ─── 恢复等待队列 ────────────────────────────────
+
+  /** 业务 exec() 在 recovering 状态时调用，等待恢复 */
+  private waitForRecovery(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // 超时还没恢复
+        this.removeWaiter(entry)
+        reject(new Error('等待淘宝桌面版恢复超时，请稍后重试'))
+      }, WAIT_RECOVERY_TIMEOUT_MS)
+
+      const entry = { resolve, reject, timer }
+      this.recoveryResolvers.push(entry)
+    })
+  }
+
+  private removeWaiter(entry: typeof this.recoveryResolvers[number]): void {
+    const idx = this.recoveryResolvers.indexOf(entry)
+    if (idx >= 0) this.recoveryResolvers.splice(idx, 1)
+    clearTimeout(entry.timer)
+  }
+
+  /** 恢复成功，唤醒所有等待者 */
+  private resolveRecoveryWaiters(): void {
+    const waiters = [...this.recoveryResolvers]
+    this.recoveryResolvers = []
+    for (const w of waiters) {
+      clearTimeout(w.timer)
+      w.resolve()
+    }
+  }
+
+  /** 恢复失败，拒绝所有等待者 */
+  private rejectRecoveryWaiters(): void {
+    const waiters = [...this.recoveryResolvers]
+    this.recoveryResolvers = []
+    for (const w of waiters) {
+      clearTimeout(w.timer)
+      w.reject(new Error('淘宝桌面版自动重启失败，请手动处理'))
+    }
+  }
+
+  // ─── 高层 API ──────────────────────────────────────
 
   /** 搜索商品 */
   async searchProducts(keyword: string, type = 'pc_taobao'): Promise<any> {
@@ -212,6 +406,17 @@ export class NativeCli {
     } finally {
       await safeUnlink(tmp)
     }
+  }
+
+  /** 搜索并等待页面加载 */
+  async searchAndWait(
+    keyword: string,
+    type = 'pc_taobao'
+  ): Promise<{ apiData: any; pageContent: string }> {
+    const apiData = await this.searchProducts(keyword, type)
+    await sleep(PAGE_SLEEP_MS)
+    const pageContent = await this.readFullPageContent()
+    return { apiData, pageContent }
   }
 
   /** 分段读取完整页面内容 */
@@ -242,18 +447,7 @@ export class NativeCli {
     return allContent
   }
 
-  /** 搜索并等待页面加载 */
-  async searchAndWait(
-    keyword: string,
-    type = 'pc_taobao'
-  ): Promise<{ apiData: any; pageContent: string }> {
-    const apiData = await this.searchProducts(keyword, type)
-    await sleep(PAGE_SLEEP_MS)
-    const pageContent = await this.readFullPageContent()
-    return { apiData, pageContent }
-  }
-
-  // ─── 连接健康检查 ────────────────────────────────────
+  // ─── 连接检查（UI 手动触发） ──────────────────────
 
   async ping(): Promise<{
     ok: boolean
@@ -261,9 +455,7 @@ export class NativeCli {
     suggestion?: string
     latencyMs?: number
   }> {
-    const start = Date.now()
-
-    // 第一步：检测 CLI 是否存在（--help 不需要执行层就绪）
+    // 先检测 CLI 是否存在
     try {
       await this.execHelp()
     } catch {
@@ -274,22 +466,22 @@ export class NativeCli {
       }
     }
 
-    // 第二步：检测执行层是否就绪
+    // 检测执行层是否就绪
     try {
-      await this.exec('get_current_tab', {})
+      const start = Date.now()
+      await this.doExec('get_current_tab', {})
+      this.transitionTo('healthy', {
+        state: 'healthy',
+        message: `已连接淘宝桌面版 (${Date.now() - start}ms)`,
+        latencyMs: Date.now() - start,
+      })
       return {
         ok: true,
         message: `已连接淘宝桌面版 (${Date.now() - start}ms)`,
         latencyMs: Date.now() - start,
       }
     } catch (err: any) {
-      const msg = err.message || ''
-
-      // 执行层未就绪 — 尝试自动重启桌面版恢复
-      if (msg.includes('未就绪') || msg.includes('未启动') || msg.includes('加载')) {
-        return await this.recoverFromNotReady(start)
-      }
-
+      // 手动 ping 不触发自动恢复（心跳循环会处理）
       return {
         ok: false,
         message: err.message,
@@ -298,59 +490,6 @@ export class NativeCli {
     }
   }
 
-  /**
-   * 执行层未就绪时自动恢复：
-   * 1. 杀掉桌面版进程
-   * 2. 重新打开桌面版
-   * 3. 等待启动完成
-   * 4. 再次验证连接
-   */
-  private async recoverFromNotReady(startTime: number): Promise<{
-    ok: boolean
-    message: string
-    suggestion?: string
-    latencyMs?: number
-  }> {
-    // 杀掉旧进程（通过 lsof + kill 精确定位，避免 pkill 误杀）
-    if (process.platform === 'darwin') {
-      // 使用 osascript 安全退出 macOS 应用
-      exec('osascript -e \'quit app "淘宝桌面版"\'')
-    } else {
-      exec('taskkill /F /IM "淘宝桌面版.exe"')
-    }
-    await sleep(3000)
-
-    // 重新打开
-    if (process.platform === 'darwin') {
-      exec('open -a "/Applications/淘宝桌面版.app"')
-    } else {
-      // Windows: 尝试常见安装路径
-      exec('start "" "淘宝桌面版"')
-    }
-
-    // 等待应用启动（最多等 40 秒，每 5 秒检测一次）
-    for (let i = 0; i < 8; i++) {
-      await sleep(5000)
-      try {
-        await this.exec('get_current_tab', {})
-        return {
-          ok: true,
-          message: `已自动重连淘宝桌面版 (${Date.now() - startTime}ms)`,
-          latencyMs: Date.now() - startTime,
-        }
-      } catch {
-        // 继续等待
-      }
-    }
-
-    return {
-      ok: false,
-      message: '淘宝桌面版连接已恢复中，请稍后重试',
-      suggestion: '桌面版正在重新启动，请等待约 30 秒后点击"重新检测连接"。',
-    }
-  }
-
-  /** 执行 --help 检测 CLI 是否存在（不需要执行层就绪），自动尝试所有路径 */
   private execHelp(): Promise<void> {
     return tryPathsUntil(
       this.cliPaths,
@@ -364,7 +503,7 @@ export class NativeCli {
     )
   }
 
-  // ─── 工具方法 ─────────────────────────────────────────
+  // ─── 工具方法 ──────────────────────────────────────
 
   tmpFile(prefix = 'tb_'): string {
     return join(tmpdir(), `${prefix}${Date.now()}.json`)

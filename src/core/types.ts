@@ -32,7 +32,6 @@ export interface Product {
 /** 店铺信息 */
 export interface StoreInfo {
   name: string
-  productCount: number
   shopUrl: string
 }
 
@@ -46,7 +45,6 @@ export interface FilterOptions {
 /** 搜索店铺结果 */
 export interface SearchStoresResult {
   keyword: string
-  totalStoresFound: number
   stores: StoreInfo[]
 }
 
@@ -73,8 +71,8 @@ export interface IPlatform {
   /** 连接健康检查 — 最重要 */
   checkConnection(): Promise<ConnectionCheckResult>
 
-  /** 搜索关键词找 TOP 店铺 */
-  searchStores(keyword: string, options?: { top?: number }): Promise<SearchStoresResult>
+  /** 搜索关键词，返回搜索结果中出现的店铺 */
+  searchStores(keyword: string): Promise<SearchStoresResult>
 
   /** 采集指定店铺的全店商品 */
   collectStore(storeName: string, filterOptions?: FilterOptions): Promise<CollectStoreResult>

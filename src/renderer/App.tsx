@@ -32,7 +32,8 @@ const App = () => {
     message: '正在检测淘宝桌面版连接...',
   })
 
-  const checkConnection = useCallback(async () => {
+  // ─── 手动重新检测（fallback） ────────────────
+  const recheck = useCallback(async () => {
     setConnection({ status: 'checking', message: '正在检测淘宝桌面版连接...' })
     try {
       const result = await window.platformAPI.checkConnection()
@@ -46,9 +47,18 @@ const App = () => {
     }
   }, [])
 
+  // ─── 订阅心跳推送（核心：主进程自动管理连接状态） ──
   useEffect(() => {
-    checkConnection()
-  }, [checkConnection])
+    const unsubscribe = window.platformAPI.onConnectionChange((result) => {
+      setConnection({
+        status: result.status,
+        message: result.message,
+        suggestion: result.suggestion,
+      })
+    })
+
+    return unsubscribe
+  }, [])
 
   // 连接状态图标
   const connIcon = {
@@ -67,6 +77,7 @@ const App = () => {
   }[connection.status]
 
   const isConnError = connection.status === 'error' || connection.status === 'disconnected'
+  const isRestarting = connection.message.includes('重启') || connection.message.includes('恢复')
 
   return (
     <ConfigProvider locale={zhCN}>
@@ -77,7 +88,7 @@ const App = () => {
           <Badge status={connColor} />
           <span
             className={`conn-status ${connection.status}`}
-            onClick={checkConnection}
+            onClick={recheck}
             style={{ cursor: 'pointer' }}
           >
             {connIcon} {connection.message}
@@ -87,17 +98,17 @@ const App = () => {
           </span>
         </header>
 
-        {/* 连接失败提示 */}
+        {/* 连接失败/恢复中提示 */}
         {isConnError && (
           <Alert
-            type={connection.message.includes('重启') ? 'warning' : 'error'}
+            type={isRestarting ? 'warning' : 'error'}
             message={connection.message}
             description={connection.suggestion}
             showIcon
             action={
-              !connection.message.includes('重启') && (
+              !isRestarting && (
                 <Space>
-                  <Button type="link" size="small" onClick={checkConnection}>
+                  <Button type="link" size="small" onClick={recheck}>
                     重新检测
                   </Button>
                 </Space>

@@ -3,7 +3,7 @@
  */
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
-import { registerIpcHandlers } from './ipc-handlers'
+import { registerIpcHandlers, cleanupIpcHandlers } from './ipc-handlers'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -47,7 +47,12 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  cleanupIpcHandlers()
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  cleanupIpcHandlers()
 })
