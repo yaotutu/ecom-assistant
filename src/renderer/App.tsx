@@ -9,11 +9,13 @@ import {
   ShopOutlined,
   SearchOutlined,
   ThunderboltOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons'
 import zhCN from 'antd/locale/zh_CN'
 import StoreCollect from './tabs/StoreCollect'
 import StoreDiscover from './tabs/StoreDiscover'
 import AutoMode from './tabs/AutoMode'
+import OneClickList from './tabs/OneClickList'
 import './App.css'
 
 // ─── 类型 ──────────────────────────────────────
@@ -149,6 +151,15 @@ const App = () => {
                   </span>
                 ),
                 children: <AutoMode />,
+              },
+              {
+                key: 'oneclick',
+                label: (
+                  <span>
+                    <CloudUploadOutlined /> 一键上货
+                  </span>
+                ),
+                children: <OneClickList />,
               },
             ]}
           />
