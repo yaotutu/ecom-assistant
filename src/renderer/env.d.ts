@@ -62,6 +62,91 @@ interface PlatformAPI {
     filterOptions: any,
     format: 'detail' | 'links'
   ): Promise<{ success: boolean; filePath?: string; error?: string }>
+
+  /**
+   * 获取淘宝商品详情（含图片下载）
+   * @param url - 淘宝商品 URL（如 https://item.taobao.com/item.htm?id=xxx）
+   */
+  fetchProductDetail(url: string): Promise<{
+    success: boolean
+    data?: {
+      detail: {
+        title: string
+        itemId: string
+        price: string
+        shopName: string
+        description: string
+        headImageUrls: string[]
+        descImageUrls: string[]
+        skus: Array<{
+          attributes: Array<{ key: string; value: string }>
+          price: string
+          stock?: number
+          imageUrl?: string
+        }>
+        sourceUrl: string
+      }
+      imagePaths: {
+        headImagePaths: string[]
+        descImagePaths: string[]
+      }
+      rawData?: {
+        pageContent: string
+        elementsData: any
+        skuData: any
+      }
+      steps: Array<{
+        name: string
+        success: boolean
+        duration: number
+        detail?: string
+      }>
+    }
+    error?: string
+  }>
+
+  /**
+   * 淘宝商品 → 微信小店一键上货
+   * 完整流程：获取详情 → 转换格式 → 上货到微信小店
+   * access_token 从 .env 环境变量自动获取
+   *
+   * @param url - 淘宝商品 URL
+   * @param transformOptions - 数据转换选项
+   * @param transformOptions.categoryPath - 微信小店类目路径（如 [[一级类目ID, 名称], [二级类目ID, 名称]]）
+   * @param transformOptions.freightTemplateId - 运费模板 ID
+   * @param transformOptions.brandId - 品牌 ID（默认 "2100000000" 无品牌）
+   * @param transformOptions.defaultStock - 默认库存（默认 100）
+   * @param listOptions - 上货选项
+   * @param listOptions.autoList - 是否自动提交上架审核（默认 false）
+   */
+  taobaoToWechat(
+    url: string,
+    transformOptions: {
+      categoryPath: [number, string][]
+      freightTemplateId: number
+      brandId?: string
+      defaultStock?: number
+    },
+    listOptions?: { autoList?: boolean }
+  ): Promise<{
+    success: boolean
+    data?: {
+      productId: string
+      images: { headImgUrls: string[]; descImgUrls: string[] }
+      autoListed: boolean
+      steps: Array<{ name: string; success: boolean; duration: number; detail?: string }>
+    }
+    error?: string
+  }>
+
+  /**
+   * 获取微信小店 access_token（从 .env 自动获取）
+   */
+  getWechatToken(): Promise<{
+    success: boolean
+    data?: string
+    error?: string
+  }>
 }
 
 interface Window {
