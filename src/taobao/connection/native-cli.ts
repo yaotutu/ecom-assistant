@@ -1,12 +1,12 @@
 /**
- * 淘宝 native CLI 封装 — 连接层
+ * 淘宝 native CLI 封装 — 连接层（精简版）
  *
  * 职责：
  * 1. 封装 CLI 调用，处理路径回退
- * 2. 心跳检测 — 定期探测连接存活，崩溃自动恢复
- * 3. 业务层不感知连接问题 — exec() 在恢复中会自动等待
+ * 2. 心跳检测 — 定期探测连接存活，失败时通知 UI
+ * 3. 不做自动恢复 — 断开时提示用户重启淘宝桌面版
  */
-import { execFile, exec } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { readFile, unlink } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
@@ -16,11 +16,10 @@ const SOURCE_APP = 'copaw'
 const TIMEOUT_MS = 120_000
 const PAGE_SLEEP_MS = 2_000
 const HEARTBEAT_DEFAULT_MS = 30_000
-const WAIT_RECOVERY_TIMEOUT_MS = 60_000
 
-// ─── 连接状态 ───────────────────────────────────────────
+// ─── 连接状态（三态：健康 / 断开 / 未知） ─────────────────
 
-export type ConnState = 'healthy' | 'recovering' | 'dead' | 'unknown'
+export type ConnState = 'healthy' | 'disconnected' | 'unknown'
 
 export interface ConnStateChange {
   state: ConnState
@@ -31,56 +30,9 @@ export interface ConnStateChange {
 
 type StateListener = (change: ConnStateChange) => void
 
-// ─── 错误诊断 ──────────────────────────────────────────
+// ─── CLI 二进制路径发现 ────────────────────────────────────
 
-interface DiagnosticResult {
-  userMessage: string
-  suggestion: string
-}
-
-const ERROR_DIAGNOSIS: Array<{ pattern: RegExp; result: DiagnosticResult }> = [
-  {
-    pattern: /ENOENT|not found|spawn/i,
-    result: {
-      userMessage: '淘宝桌面版未安装',
-      suggestion: '请安装淘宝桌面版，安装后重启本工具。',
-    },
-  },
-  {
-    pattern: /执行层未就绪/i,
-    result: {
-      userMessage: '淘宝桌面版未启动或正在加载中',
-      suggestion: '请打开淘宝桌面版，等待完全加载后再试。',
-    },
-  },
-  {
-    pattern: /内测期间仅开放部分用户/i,
-    result: {
-      userMessage: '淘宝桌面版正在启动中，请稍候',
-      suggestion: '客户端需要几秒启动，请等待 10 秒后重试。',
-    },
-  },
-  {
-    pattern: /timed out|ETIMEDOUT/i,
-    result: {
-      userMessage: '连接超时',
-      suggestion: '淘宝桌面版可能无响应，请关闭后重新打开。',
-    },
-  },
-]
-
-function diagnose(error: Error): DiagnosticResult {
-  for (const { pattern, result } of ERROR_DIAGNOSIS) {
-    if (pattern.test(error.message)) return result
-  }
-  return {
-    userMessage: `连接失败: ${error.message}`,
-    suggestion: '请确认淘宝桌面版已安装并正在运行。',
-  }
-}
-
-// ─── CLI 二进制路径 ────────────────────────────────────
-
+/** 按优先级返回候选 CLI 路径列表 */
 function getCliPaths(): string[] {
   const paths = ['taobao-native']
 
@@ -110,8 +62,12 @@ function getCliPaths(): string[] {
   return paths
 }
 
-// ─── 路径回退 ──────────────────────────────────────────
+// ─── 路径回退 ──────────────────────────────────────────────
 
+/**
+ * 依次尝试候选路径执行函数
+ * 只在 ENOENT（命令不存在）时回退到下一个路径，其他错误直接中断
+ */
 async function tryPathsUntil<T>(
   paths: string[],
   fn: (cliPath: string) => Promise<T>
@@ -123,19 +79,32 @@ async function tryPathsUntil<T>(
       return await fn(p)
     } catch (err) {
       lastError = err as Error
+      // 只在 CLI 不存在时尝试下一个路径
       if (!/ENOENT|not found|spawn/i.test(lastError.message)) {
         break
       }
     }
   }
 
-  const diag = diagnose(lastError!)
-  const err = new Error(diag.userMessage)
-  ;(err as any).suggestion = diag.suggestion
+  // 根据最后一个错误生成用户友好的提示
+  const msg = lastError?.message ?? ''
+  if (/ENOENT|not found|spawn/i.test(msg)) {
+    const err = new Error('淘宝桌面版未安装或 CLI 不可用')
+    ;(err as any).suggestion = '请安装淘宝桌面版，安装后重启本工具。'
+    throw err
+  }
+  if (/timed out|ETIMEDOUT/i.test(msg)) {
+    const err = new Error('连接超时，淘宝桌面版可能无响应')
+    ;(err as any).suggestion = '请关闭淘宝桌面版后重新打开，然后点击「重新检测」。'
+    throw err
+  }
+
+  const err = new Error(`连接失败: ${msg}`)
+  ;(err as any).suggestion = '请确认淘宝桌面版已安装并正在运行。'
   throw err
 }
 
-// ─── NativeCli 核心 ────────────────────────────────────
+// ─── NativeCli 核心 ────────────────────────────────────────
 
 export class NativeCli {
   private cliPaths: string[]
@@ -144,13 +113,6 @@ export class NativeCli {
   private connState: ConnState = 'unknown'
   private listeners = new Set<StateListener>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
-
-  // 恢复中等待队列：业务 exec() 在 recovering 状态时挂起的 Promise
-  private recoveryResolvers: Array<{
-    resolve: () => void
-    reject: (err: Error) => void
-    timer: ReturnType<typeof setTimeout>
-  }> = []
 
   constructor() {
     this.cliPaths = getCliPaths()
@@ -180,38 +142,26 @@ export class NativeCli {
     return () => { this.listeners.delete(cb) }
   }
 
-  /** 获取当前连接状态 */
-  getState(): ConnState {
-    return this.connState
-  }
-
-  // ─── 核心执行（带状态感知） ────────────────────────
+  // ─── 核心执行 ──────────────────────────────────────
 
   /**
    * 执行 CLI 命令
-   * - healthy → 直接执行
-   * - recovering → 等待恢复后执行（最多 60s）
-   * - dead → 直接拒绝
+   * - healthy / unknown → 直接执行
+   * - disconnected → 拒绝，提示用户重新连接
    */
   async exec(
     tool: string,
     args: Record<string, unknown>,
     outputFile?: string
   ): Promise<any> {
-    // 如果正在恢复中，等待恢复完成
-    if (this.connState === 'recovering') {
-      await this.waitForRecovery()
-    }
-
-    // dead 状态直接拒绝
-    if (this.connState === 'dead') {
-      throw new Error('淘宝桌面版连接已断开，请重启桌面版后重试')
+    if (this.connState === 'disconnected') {
+      throw new Error('淘宝桌面版连接已断开，请重启淘宝桌面版后点击「重新检测」')
     }
 
     return this.doExec(tool, args, outputFile)
   }
 
-  /** 实际执行 CLI 命令（路径回退 + 错误诊断） */
+  /** 实际执行 CLI 命令（路径回退） */
   private async doExec(
     tool: string,
     args: Record<string, unknown>,
@@ -226,6 +176,7 @@ export class NativeCli {
     )
   }
 
+  /** 执行单次 CLI 调用 */
   private execOnce(
     cmd: string,
     argArray: string[],
@@ -242,6 +193,7 @@ export class NativeCli {
             return
           }
 
+          // 优先从输出文件读取结果
           if (outputFile) {
             try {
               const content = await readFile(outputFile, 'utf-8')
@@ -266,7 +218,7 @@ export class NativeCli {
 
   // ─── 心跳检测 ─────────────────────────────────────
 
-  /** 单次心跳：ping → 更新状态 → 自动恢复（如果需要） */
+  /** 单次心跳：ping → 更新状态，失败直接标记为断开 */
   private async heartbeatTick(): Promise<void> {
     try {
       const start = Date.now()
@@ -277,56 +229,12 @@ export class NativeCli {
         latencyMs: Date.now() - start,
       })
     } catch {
-      // 连接异常，尝试自动恢复
-      await this.attemptRecovery()
+      this.transitionTo('disconnected', {
+        state: 'disconnected',
+        message: '淘宝桌面版连接已断开',
+        suggestion: '请重启淘宝桌面版，然后点击「重新检测」。',
+      })
     }
-  }
-
-  /** 尝试自动恢复淘宝桌面版 */
-  private async attemptRecovery(): Promise<void> {
-    this.transitionTo('recovering', {
-      state: 'recovering',
-      message: '检测到淘宝桌面版连接异常，正在自动重启...',
-    })
-
-    // 杀掉旧进程
-    if (process.platform === 'darwin') {
-      exec('osascript -e \'quit app "淘宝桌面版"\'')
-    } else {
-      exec('taskkill /F /IM "淘宝桌面版.exe"')
-    }
-    await sleep(3000)
-
-    // 重新打开
-    if (process.platform === 'darwin') {
-      exec('open -a "/Applications/淘宝桌面版.app"')
-    } else {
-      exec('start "" "淘宝桌面版"')
-    }
-
-    // 等待启动完成（最多 40 秒，每 5 秒检测一次）
-    for (let i = 0; i < 8; i++) {
-      await sleep(5000)
-      try {
-        const start = Date.now()
-        await this.doExec('get_current_tab', {})
-        this.transitionTo('healthy', {
-          state: 'healthy',
-          message: `已自动重连淘宝桌面版 (${Date.now() - start}ms)`,
-          latencyMs: Date.now() - start,
-        })
-        return
-      } catch {
-        // 继续等待
-      }
-    }
-
-    // 恢复失败
-    this.transitionTo('dead', {
-      state: 'dead',
-      message: '淘宝桌面版自动重启失败，请手动处理',
-      suggestion: '请手动打开淘宝桌面版并确认已登录，然后点击「重新检测」。',
-    })
   }
 
   // ─── 状态切换 & 通知 ──────────────────────────────
@@ -336,63 +244,10 @@ export class NativeCli {
     const prev = this.connState
     this.connState = state
 
-    // 状态变化时通知监听者
     if (prev !== state) {
       for (const cb of this.listeners) {
         try { cb(change) } catch { /* 防止监听者异常 */ }
       }
-
-      // 恢复成功时，唤醒所有等待中的业务调用
-      if (state === 'healthy' && prev === 'recovering') {
-        this.resolveRecoveryWaiters()
-      }
-
-      // 彻底失败时，拒绝所有等待中的业务调用
-      if (state === 'dead' && prev === 'recovering') {
-        this.rejectRecoveryWaiters()
-      }
-    }
-  }
-
-  // ─── 恢复等待队列 ────────────────────────────────
-
-  /** 业务 exec() 在 recovering 状态时调用，等待恢复 */
-  private waitForRecovery(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        // 超时还没恢复
-        this.removeWaiter(entry)
-        reject(new Error('等待淘宝桌面版恢复超时，请稍后重试'))
-      }, WAIT_RECOVERY_TIMEOUT_MS)
-
-      const entry = { resolve, reject, timer }
-      this.recoveryResolvers.push(entry)
-    })
-  }
-
-  private removeWaiter(entry: typeof this.recoveryResolvers[number]): void {
-    const idx = this.recoveryResolvers.indexOf(entry)
-    if (idx >= 0) this.recoveryResolvers.splice(idx, 1)
-    clearTimeout(entry.timer)
-  }
-
-  /** 恢复成功，唤醒所有等待者 */
-  private resolveRecoveryWaiters(): void {
-    const waiters = [...this.recoveryResolvers]
-    this.recoveryResolvers = []
-    for (const w of waiters) {
-      clearTimeout(w.timer)
-      w.resolve()
-    }
-  }
-
-  /** 恢复失败，拒绝所有等待者 */
-  private rejectRecoveryWaiters(): void {
-    const waiters = [...this.recoveryResolvers]
-    this.recoveryResolvers = []
-    for (const w of waiters) {
-      clearTimeout(w.timer)
-      w.reject(new Error('淘宝桌面版自动重启失败，请手动处理'))
     }
   }
 
@@ -474,7 +329,7 @@ export class NativeCli {
     }
   }
 
-  // ─── 连接检查（UI 手动触发） ──────────────────────
+  // ─── 手动连接检查（UI 点击「重新检测」时触发） ──────
 
   async ping(): Promise<{
     ok: boolean
@@ -482,7 +337,7 @@ export class NativeCli {
     suggestion?: string
     latencyMs?: number
   }> {
-    // 先检测 CLI 是否存在
+    // 先检测 CLI 二进制是否存在
     try {
       await this.execHelp()
     } catch {
@@ -497,26 +352,32 @@ export class NativeCli {
     try {
       const start = Date.now()
       await this.doExec('get_current_tab', {})
+      const latencyMs = Date.now() - start
       this.transitionTo('healthy', {
         state: 'healthy',
-        message: `已连接淘宝桌面版 (${Date.now() - start}ms)`,
-        latencyMs: Date.now() - start,
+        message: `已连接淘宝桌面版 (${latencyMs}ms)`,
+        latencyMs,
       })
       return {
         ok: true,
-        message: `已连接淘宝桌面版 (${Date.now() - start}ms)`,
-        latencyMs: Date.now() - start,
+        message: `已连接淘宝桌面版 (${latencyMs}ms)`,
+        latencyMs,
       }
     } catch (err: any) {
-      // 手动 ping 不触发自动恢复（心跳循环会处理）
+      this.transitionTo('disconnected', {
+        state: 'disconnected',
+        message: '淘宝桌面版连接已断开',
+        suggestion: '请重启淘宝桌面版，然后点击「重新检测」。',
+      })
       return {
         ok: false,
         message: err.message,
-        suggestion: err.suggestion,
+        suggestion: err.suggestion ?? '请重启淘宝桌面版，然后点击「重新检测」。',
       }
     }
   }
 
+  /** 执行 --help 验证 CLI 二进制是否可用 */
   private execHelp(): Promise<void> {
     return tryPathsUntil(
       this.cliPaths,

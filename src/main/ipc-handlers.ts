@@ -55,11 +55,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   // ─── 启动心跳 + 监听状态变更 ────────────────────
   cli.startHeartbeat()
   cli.onStateChange((change) => {
-    // 推送连接状态到渲染进程
+    // 推送连接状态到渲染进程（三态：connected / disconnected / checking）
     if (!win.isDestroyed()) {
       win.webContents.send(IPC.CONNECTION_STATUS, {
         status: change.state === 'healthy' ? 'connected'
-          : change.state === 'recovering' ? 'checking'
           : change.state === 'unknown' ? 'checking'
           : 'disconnected',
         message: change.message,

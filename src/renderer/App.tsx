@@ -79,7 +79,6 @@ const App = () => {
   }[connection.status]
 
   const isConnError = connection.status === 'error' || connection.status === 'disconnected'
-  const isRestarting = connection.message.includes('重启') || connection.message.includes('恢复')
 
   return (
     <ConfigProvider locale={zhCN}>
@@ -100,21 +99,19 @@ const App = () => {
           </span>
         </header>
 
-        {/* 连接失败/恢复中提示 */}
+        {/* 连接失败提示 */}
         {isConnError && (
           <Alert
-            type={isRestarting ? 'warning' : 'error'}
+            type="error"
             message={connection.message}
             description={connection.suggestion}
             showIcon
             action={
-              !isRestarting && (
-                <Space>
-                  <Button type="link" size="small" onClick={recheck}>
-                    重新检测
-                  </Button>
-                </Space>
-              )
+              <Space>
+                <Button type="link" size="small" onClick={recheck}>
+                  重新检测
+                </Button>
+              </Space>
             }
             style={{ marginBottom: 20 }}
           />

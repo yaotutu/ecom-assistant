@@ -37,35 +37,10 @@ export class TaobaoPlatform implements IPlatform {
       return { status: 'connected', message: ping.message }
     }
 
-    const msg = ping.message || ''
-
-    if (msg.includes('未安装') || msg.includes('CLI 不可用')) {
-      return {
-        status: 'disconnected',
-        message: '淘宝桌面版未安装',
-        suggestion: ping.suggestion,
-      }
-    }
-
-    if (msg.includes('恢复中') || msg.includes('重新启动')) {
-      return {
-        status: 'disconnected',
-        message: '正在自动重启淘宝桌面版...',
-        suggestion: ping.suggestion,
-      }
-    }
-
-    if (msg.includes('未启动') || msg.includes('未就绪') || msg.includes('加载')) {
-      return {
-        status: 'disconnected',
-        message: '淘宝桌面版未启动或正在加载',
-        suggestion: ping.suggestion,
-      }
-    }
-
+    // 所有失败情况统一返回 disconnected
     return {
-      status: 'error',
-      message: msg,
+      status: 'disconnected',
+      message: ping.message,
       suggestion: ping.suggestion,
     }
   }
