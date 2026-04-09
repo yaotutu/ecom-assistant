@@ -7,16 +7,20 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #3741 | 2:38 PM | 🟣 | Added developer debugging panel to OneClickList.tsx for raw Taobao data inspection | ~359 |
-| #3740 | 2:37 PM | 🔴 | Fixed SKU attribute property access bug in OneClickList.tsx | ~226 |
 | #3739 | 2:36 PM | 🔴 | Fixed SKU attribute property name mismatch in OneClickList component | ~184 |
-| #3724 | 1:52 PM | 🔄 | Refactored Divider component in OneClickList.tsx to remove deprecated props | ~191 |
-| #3723 | " | ✅ | Refactored Divider component styling in OneClickList.tsx from orientation props to inline styles | ~216 |
-| #3721 | 1:51 PM | 🟣 | One-click product listing UI component created | ~960 |
 
 ### Apr 9, 2026
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #3875 | 9:51 AM | 🔵 | One-click listing UI relies on CLI-based product fetching with acknowledged limitations | ~473 |
+| #4067 | 2:19 PM | 🟣 | Added comprehensive error handling and step-by-step progress logging to TaobaoBrowser upload functionality | ~425 |
+| #4066 | 2:17 PM | 🟣 | Enhanced TaobaoBrowser upload functionality with step tracking and error state management | ~322 |
+| #4054 | 2:06 PM | 🟣 | Enhanced scrolling strategy and image extraction in TaobaoBrowser for better lazy-loaded content capture | ~465 |
+| #4020 | 11:37 AM | 🔴 | Refactored EXTRACT_SCRIPT to use DOM-based extraction instead of JavaScript global variables | ~486 |
+| #3988 | 11:25 AM | 🟣 | Implemented TaobaoBrowser.tsx with visible WebView for manual authentication and real-time data extraction | ~523 |
+| #3987 | 11:24 AM | 🟣 | Added BugOutlined icon to TaobaoBrowser.tsx component | ~325 |
+| #3924 | 10:17 AM | 🔴 | Fixed React hook dependency array in handleOneClick callback | ~302 |
+| #3922 | 10:16 AM | 🟣 | Added login guard to one-click listing handler | ~279 |
+| #3920 | 10:15 AM | 🟣 | Added login status alert bar to OneClickList UI with authentication controls | ~424 |
+| #3918 | 10:14 AM | 🟣 | Added Taobao login state management to OneClickList UI component | ~376 |
 </claude-mem-context>

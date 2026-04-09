@@ -1,12 +1,13 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   Card, Input, InputNumber, Button, Space, message, Steps, Descriptions,
   Image, Collapse, Switch, Tag, Empty, Spin, Divider, Typography, Alert,
+  Badge, Tooltip,
 } from 'antd'
 import {
   LinkOutlined, CloudUploadOutlined, EyeOutlined,
   CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
-  SettingOutlined,
+  SettingOutlined, UserOutlined, LogoutOutlined, LoginOutlined,
 } from '@ant-design/icons'
 
 const { Text, Paragraph } = Typography
@@ -56,6 +57,10 @@ const OneClickList = () => {
   const [defaultStock, setDefaultStock] = useState(100)
   const [autoList, setAutoList] = useState(false)
 
+  // ─── 淘宝登录状态 ──────────────────────────────
+  const [taobaoLoggedIn, setTaobaoLoggedIn] = useState(false)
+  const [checkingLogin, setCheckingLogin] = useState(true)
+
   // ─── 流程状态 ──────────────────────────────
   const [fetching, setFetching] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -68,6 +73,41 @@ const OneClickList = () => {
   const hasDetail = !!detail
   const canUpload = hasDetail && !uploading
 
+  // ─── 检查淘宝登录状态 ──────────────────────────────
+  const checkLogin = useCallback(async () => {
+    setCheckingLogin(true)
+    try {
+      const loggedIn = await window.platformAPI.checkTaobaoLogin()
+      setTaobaoLoggedIn(loggedIn)
+    } catch {
+      setTaobaoLoggedIn(false)
+    } finally {
+      setCheckingLogin(false)
+    }
+  }, [])
+
+  // 组件挂载时检查登录状态
+  useEffect(() => {
+    checkLogin()
+  }, [checkLogin])
+
+  // ─── 登录/登出操作 ──────────────────────────────
+  const handleLogin = useCallback(async () => {
+    const success = await window.platformAPI.taobaoLogin()
+    if (success) {
+      setTaobaoLoggedIn(true)
+      message.success('淘宝登录成功')
+    } else {
+      message.info('已取消登录')
+    }
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    await window.platformAPI.taobaoLogout()
+    setTaobaoLoggedIn(false)
+    message.success('已退出淘宝登录')
+  }, [])
+
   // ─── 转换选项（固定默认值，后续可扩展为可配置） ──
   const transformOptions = {
     categoryPath: [[789, '家居生活'], [790, '日用杂物']] as [number, string][],
@@ -78,6 +118,13 @@ const OneClickList = () => {
   // ─── 步骤 1：获取淘宝商品详情 ──────────────
   const handleFetch = useCallback(async () => {
     if (fetching || !taobaoUrl.trim()) return
+
+    // 检查淘宝登录状态
+    if (!taobaoLoggedIn) {
+      message.warning('请先登录淘宝账号')
+      return
+    }
+
     setFetching(true)
     setDetail(null)
     setRawData(null)
@@ -106,7 +153,7 @@ const OneClickList = () => {
     } finally {
       setFetching(false)
     }
-  }, [fetching, taobaoUrl])
+  }, [fetching, taobaoUrl, taobaoLoggedIn])
 
   // ─── 步骤 2：上货到微信小店 ─────────────────
   const handleUpload = useCallback(async () => {
@@ -150,6 +197,12 @@ const OneClickList = () => {
   const handleOneClick = useCallback(async () => {
     if (!taobaoUrl.trim()) return
 
+    // 检查淘宝登录状态
+    if (!taobaoLoggedIn) {
+      message.warning('请先登录淘宝账号')
+      return
+    }
+
     setUploading(true)
     setFetching(true)
     setDetail(null)
@@ -184,10 +237,60 @@ const OneClickList = () => {
       setFetching(false)
       setUploading(false)
     }
-  }, [taobaoUrl, freightTemplateId, defaultStock, autoList])
+  }, [taobaoUrl, freightTemplateId, defaultStock, autoList, taobaoLoggedIn])
 
   return (
     <div className="tab-panel">
+      {/* ─── 淘宝登录状态栏 ──────────────────── */}
+      <Alert
+        type={taobaoLoggedIn ? 'success' : 'warning'}
+        message={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Space>
+              <Badge status={taobaoLoggedIn ? 'success' : 'warning'} />
+              <span>
+                {checkingLogin
+                  ? '检测登录状态中...'
+                  : taobaoLoggedIn
+                    ? '淘宝已登录，可以获取商品详情'
+                    : '请先登录淘宝账号以获取商品详情'}
+              </span>
+            </Space>
+            <Space>
+              {taobaoLoggedIn ? (
+                <Button
+                  size="small"
+                  icon={<LogoutOutlined />}
+                  onClick={handleLogout}
+                >
+                  退出登录
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<LoginOutlined />}
+                  loading={checkingLogin}
+                  onClick={handleLogin}
+                >
+                  登录淘宝
+                </Button>
+              )}
+              <Tooltip title="刷新登录状态">
+                <Button
+                  size="small"
+                  icon={<UserOutlined />}
+                  onClick={checkLogin}
+                  loading={checkingLogin}
+                />
+              </Tooltip>
+            </Space>
+          </div>
+        }
+        showIcon={false}
+        style={{ marginBottom: 16 }}
+      />
+
       {/* ─── 环境变量提示 ─────────────────────── */}
       <Alert
         type="info"
@@ -261,7 +364,7 @@ const OneClickList = () => {
             <Button
               icon={<EyeOutlined />}
               loading={fetching}
-              disabled={!taobaoUrl.trim() || uploading}
+              disabled={!taobaoUrl.trim() || uploading || !taobaoLoggedIn}
               onClick={handleFetch}
             >
               {fetching ? '获取中' : '获取详情'}
@@ -279,7 +382,7 @@ const OneClickList = () => {
               type="primary"
               icon={<CloudUploadOutlined />}
               loading={uploading || fetching}
-              disabled={!taobaoUrl.trim()}
+              disabled={!taobaoUrl.trim() || !taobaoLoggedIn}
               onClick={handleOneClick}
               style={{ background: '#722ed1', borderColor: '#722ed1' }}
             >

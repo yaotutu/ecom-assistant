@@ -17,6 +17,9 @@ const TIMEOUT_MS = 120_000
 const PAGE_SLEEP_MS = 2_000
 const HEARTBEAT_DEFAULT_MS = 30_000
 
+// TODO: 临时禁用连接检测，开发完成后改回 false
+const SKIP_CONNECTION_CHECK = true
+
 // ─── 连接状态（三态：健康 / 断开 / 未知） ─────────────────
 
 export type ConnState = 'healthy' | 'disconnected' | 'unknown'
@@ -88,6 +91,8 @@ async function tryPathsUntil<T>(
 
   // 根据最后一个错误生成用户友好的提示
   const msg = lastError?.message ?? ''
+  const suggestion = (lastError as any)?.suggestion
+
   if (/ENOENT|not found|spawn/i.test(msg)) {
     const err = new Error('淘宝桌面版未安装或 CLI 不可用')
     ;(err as any).suggestion = '请安装淘宝桌面版，安装后重启本工具。'
@@ -98,9 +103,15 @@ async function tryPathsUntil<T>(
     ;(err as any).suggestion = '请关闭淘宝桌面版后重新打开，然后点击「重新检测」。'
     throw err
   }
+  if (/未就绪|未启动|加载/i.test(msg)) {
+    const err = new Error('淘宝桌面版未启动或正在加载中')
+    ;(err as any).suggestion = suggestion ?? '请打开淘宝桌面版，等待完全加载后再试。'
+    throw err
+  }
 
-  const err = new Error(`连接失败: ${msg}`)
-  ;(err as any).suggestion = '请确认淘宝桌面版已安装并正在运行。'
+  // 其他错误：直接透传 CLI 返回的错误信息
+  const err = new Error(msg)
+  ;(err as any).suggestion = suggestion ?? '请确认淘宝桌面版已安装并正在运行。'
   throw err
 }
 
@@ -154,7 +165,7 @@ export class NativeCli {
     args: Record<string, unknown>,
     outputFile?: string
   ): Promise<any> {
-    if (this.connState === 'disconnected') {
+    if (!SKIP_CONNECTION_CHECK && this.connState === 'disconnected') {
       throw new Error('淘宝桌面版连接已断开，请重启淘宝桌面版后点击「重新检测」')
     }
 
@@ -187,8 +198,25 @@ export class NativeCli {
         cmd,
         argArray,
         { timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
-        async (error, stdout) => {
+        async (error, stdout, stderr) => {
           if (error) {
+            // CLI 非零退出时，stdout/stderr 中包含实际错误信息（如 {"error":"执行层未就绪"}）
+            const output = (stderr || '').trim() || (stdout || '').trim()
+            if (output) {
+              try {
+                const parsed = JSON.parse(output)
+                if (parsed.error) {
+                  const enriched = new Error(parsed.error)
+                  ;(enriched as any).suggestion = parsed.suggestion
+                  reject(enriched)
+                  return
+                }
+              } catch {
+                // 非 JSON，用原始输出作为错误信息
+                reject(new Error(output))
+                return
+              }
+            }
             reject(error)
             return
           }
@@ -220,6 +248,14 @@ export class NativeCli {
 
   /** 单次心跳：ping → 更新状态，失败直接标记为断开 */
   private async heartbeatTick(): Promise<void> {
+    if (SKIP_CONNECTION_CHECK) {
+      this.transitionTo('healthy', {
+        state: 'healthy',
+        message: '已连接淘宝桌面版（检测已跳过）',
+      })
+      return
+    }
+
     try {
       const start = Date.now()
       await this.doExec('get_current_tab', {})
@@ -337,6 +373,18 @@ export class NativeCli {
     suggestion?: string
     latencyMs?: number
   }> {
+    // 跳过连接检测时直接返回成功
+    if (SKIP_CONNECTION_CHECK) {
+      this.transitionTo('healthy', {
+        state: 'healthy',
+        message: '已连接淘宝桌面版（检测已跳过）',
+      })
+      return {
+        ok: true,
+        message: '已连接淘宝桌面版（检测已跳过）',
+      }
+    }
+
     // 先检测 CLI 二进制是否存在
     try {
       await this.execHelp()

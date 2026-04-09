@@ -97,4 +97,51 @@ contextBridge.exposeInMainWorld('platformAPI', {
   getWechatToken(): Promise<any> {
     return ipcRenderer.invoke('wechat:get-token')
   },
+
+  // ─── 淘宝 WebView 登录管理 ──────────────────────────
+
+  /** 检查淘宝登录状态 */
+  checkTaobaoLogin(): Promise<boolean> {
+    return ipcRenderer.invoke('taobao:check-login')
+  },
+
+  /** 弹出淘宝登录窗口 */
+  taobaoLogin(): Promise<boolean> {
+    return ipcRenderer.invoke('taobao:login')
+  },
+
+  /** 清除淘宝登录态（登出） */
+  taobaoLogout(): Promise<boolean> {
+    return ipcRenderer.invoke('taobao:logout')
+  },
+
+  /** 获取淘宝 session 摘要信息（调试用） */
+  getTaobaoSessionInfo(): Promise<{ cookieCount: number; hasLoginCookie: boolean }> {
+    return ipcRenderer.invoke('taobao:session-info')
+  },
+
+  /**
+   * 上传已提取的商品数据到微信小店（浏览器标签页专用）
+   *
+   * @param product - 从 webview 提取的商品数据
+   * @param transformOptions - 微信小店转换选项
+   * @param listOptions - 上货选项
+   */
+  uploadExtractedProduct(
+    product: any,
+    transformOptions: any,
+    listOptions?: { autoList?: boolean }
+  ): Promise<any> {
+    return ipcRenderer.invoke(
+      'taobao:upload-extracted-product',
+      product,
+      transformOptions,
+      listOptions
+    )
+  },
+
+  /** 测试类目匹配 */
+  testCategoryMatch(title: string): Promise<any> {
+    return ipcRenderer.invoke('wechat:test-category-match', title)
+  },
 })

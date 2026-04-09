@@ -15,6 +15,7 @@
 
 import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
+import sharp from 'sharp'
 import type {
   WechatApiResponse,
   UploadImageResult,
@@ -107,10 +108,15 @@ const checkResponse = <T>(
 }
 
 /**
- * 从本地图片文件读取尺寸（仅支持 PNG 和 JPEG）
+ * 从本地图片文件读取尺寸
  *
- * PNG: IHDR chunk 在文件头，直接读取 width/height
- * JPEG: 查找 SOF0/SOF2 marker 读取尺寸
+ * 支持：PNG、JPEG、WebP
+ * - PNG: IHDR chunk 在文件头，直接读取 width/height
+ * - JPEG: 查找 SOF0/SOF2 marker 读取尺寸
+ * - WebP: RIFF header 中读取（简单 lossy 格式）或 VP8L lossless
+ *
+ * 注意：淘宝图片即使 URL 以 .jpg 结尾，实际内容可能是 webp 格式。
+ * 因此除了按扩展名判断，还会检测文件头的 magic bytes。
  *
  * @param filePath - 本地图片文件路径
  * @returns { width, height } 或 null（无法解析时）
@@ -119,19 +125,47 @@ const readImageDimensions = (
   filePath: string
 ): { width: number; height: number } | null => {
   const buf = readFileSync(filePath)
+  if (buf.length < 24) return null
+
   const ext = extname(filePath).toLowerCase()
 
-  // PNG: 文件头 8 字节签名 + 4 字节长度 + 4 字节类型('IHDR') + 4 字节 width + 4 字节 height
-  if (ext === '.png') {
-    if (buf.length < 24) return null
+  // 先检测文件实际格式（magic bytes），比扩展名更可靠
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8
+  const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+    && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+
+  // PNG: IHDR chunk
+  if (isPng) {
     return {
       width: buf.readUInt32BE(16),
       height: buf.readUInt32BE(20),
     }
   }
 
+  // WebP: RIFF + VP8/VP8L
+  if (isWebp) {
+    // VP8 lossy: "VP8 " at offset 12
+    if (buf[12] === 0x56 && buf[13] === 0x50 && buf[14] === 0x38 && buf[15] === 0x20) {
+      if (buf.length < 30) return null
+      // VP8 bitstream: width/height at offset 26 (2 bytes each, lower 14 bits)
+      const w = buf.readUInt16LE(26) & 0x3fff
+      const h = buf.readUInt16LE(28) & 0x3fff
+      return { width: w, height: h }
+    }
+    // VP8L lossless: "VP8L" at offset 12
+    if (buf[12] === 0x56 && buf[13] === 0x50 && buf[14] === 0x38 && buf[15] === 0x4c) {
+      if (buf.length < 25) return null
+      const bits = buf.readUInt32LE(21)
+      const w = (bits & 0x3fff) + 1
+      const h = ((bits >> 14) & 0x3fff) + 1
+      return { width: w, height: h }
+    }
+    return null
+  }
+
   // JPEG: 遍历 marker 查找 SOF0 (0xFFC0) 或 SOF2 (0xFFC2)
-  if (ext === '.jpg' || ext === '.jpeg') {
+  if (isJpeg) {
     let offset = 2 // 跳过 SOI marker (0xFFD8)
     while (offset < buf.length - 9) {
       if (buf[offset] !== 0xff) break
@@ -183,17 +217,47 @@ export const uploadImage = async (
   filePath: string
 ): Promise<string> => {
   // 1. 读取文件
-  const fileBuffer = readFileSync(filePath)
-  const ext = extname(filePath).toLowerCase()
-  const mimeType = MIME_MAP[ext]
-  if (!mimeType) {
-    throw new Error(
-      `不支持的图片格式: ${ext}，仅支持 bmp/jpg/png/svg/webp`
-    )
+  let fileBuffer = readFileSync(filePath)
+
+  // 根据文件实际内容检测 MIME 类型（比扩展名更可靠）
+  // 淘宝图片经常 .jpg 扩展名但实际是 webp 格式
+  const isPng = fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50
+  const isJpeg = fileBuffer[0] === 0xff && fileBuffer[1] === 0xd8
+  const isWebp = fileBuffer[0] === 0x52 && fileBuffer[1] === 0x49
+    && fileBuffer[8] === 0x57 && fileBuffer[9] === 0x45
+  // GIF 检测（GIF87a 或 GIF89a）
+  const isGif = fileBuffer[0] === 0x47 && fileBuffer[1] === 0x49 && fileBuffer[2] === 0x46
+
+  // GIF 不被微信支持，自动转换为 PNG（取第一帧）
+  if (isGif) {
+    console.log(`[微信上传图片] 检测到 GIF 格式，自动转换为 PNG: ${filePath}`)
+    fileBuffer = Buffer.from(await sharp(fileBuffer).png().toBuffer())
   }
 
-  // 2. 自动获取图片尺寸
-  const dimensions = readImageDimensions(filePath)
+  // 转换后重新检测格式（因为 fileBuffer 可能已变化）
+  let mimeType: string
+  if (isPng) mimeType = 'image/png'
+  else if (isJpeg) mimeType = 'image/jpeg'
+  else if (isWebp) mimeType = 'image/webp'
+  else if (isGif) mimeType = 'image/png'  // GIF 已转为 PNG
+  else {
+    // 回退到扩展名判断
+    const ext = extname(filePath).toLowerCase()
+    mimeType = MIME_MAP[ext]
+    if (!mimeType) {
+      throw new Error(`不支持的图片格式: ${ext}，仅支持 bmp/jpg/png/svg/webp`)
+    }
+  }
+
+  // 2. 自动获取图片尺寸（GIF 转换后从 buffer 读取，否则从文件读取）
+  let dimensions: { width: number; height: number } | null
+  if (isGif) {
+    // 转换后的 PNG，用 sharp 获取尺寸
+    const meta = await sharp(fileBuffer).metadata()
+    dimensions = meta.width && meta.height ? { width: meta.width, height: meta.height } : null
+  } else {
+    dimensions = readImageDimensions(filePath)
+  }
   if (!dimensions) {
     throw new Error(`无法读取图片尺寸: ${filePath}`)
   }
@@ -201,7 +265,8 @@ export const uploadImage = async (
   // 3. 构建 multipart/form-data 上传请求
   const blob = new Blob([fileBuffer], { type: mimeType })
   const formData = new FormData()
-  formData.append('media', blob, `image${ext}`)
+  const uploadExt = isGif ? '.png' : extname(filePath).toLowerCase()
+  formData.append('media', blob, `image${uploadExt}`)
 
   const url = new URL(`${API_BASE}/shop/ec/basics/img/upload`)
   url.searchParams.set('access_token', accessToken)
@@ -214,14 +279,25 @@ export const uploadImage = async (
     method: 'POST',
     body: formData,
   })
-  const result = (await resp.json()) as WechatApiResponse<UploadImageResult>
-
-  const data = checkResponse(result, '上传图片')
-
-  if (!data.img_url) {
-    throw new Error('上传图片成功但未返回 img_url')
+  const result = (await resp.json()) as WechatApiResponse<UploadImageResult> & {
+    pic_file?: { img_url?: string }
   }
-  return data.img_url
+
+  // 调试：打印微信 API 返回的完整数据
+  console.log('[微信上传图片] API 原始返回:', JSON.stringify(result))
+
+  // 微信图片上传接口返回格式特殊：
+  // { errcode: 0, errmsg: "ok", pic_file: { img_url: "https://mmecimage.cn/p/..." } }
+  // img_url 在 pic_file 下，不在 data 中
+  if (result.errcode !== 0) {
+    throw new Error(`上传图片失败 [${result.errcode}]: ${result.errmsg}`)
+  }
+
+  const imgUrl = result.pic_file?.img_url || result.data?.img_url
+  if (!imgUrl) {
+    throw new Error(`上传图片成功但未返回 img_url，API 返回: ${JSON.stringify(result)}`)
+  }
+  return imgUrl
 }
 
 // ============================================================
@@ -252,7 +328,10 @@ export const getAllCategories = async (
     '/channels/ec/category/all',
     accessToken
   )
-  return checkResponse(result, '获取类目列表').cats ?? []
+  if (result.errcode !== 0) {
+    throw new Error(`获取类目列表失败 [${result.errcode}]: ${result.errmsg}`)
+  }
+  return (result as any).cats ?? []
 }
 
 /**
@@ -310,7 +389,10 @@ export const getFreightTemplates = async (
     accessToken,
     { limit: 100, offset: 0 }
   )
-  return checkResponse(result, '获取运费模板').template_id_list ?? []
+  if (result.errcode !== 0) {
+    throw new Error(`获取运费模板失败 [${result.errcode}]: ${result.errmsg}`)
+  }
+  return (result as any).template_id_list ?? []
 }
 
 // ============================================================
@@ -338,7 +420,10 @@ export const getAfterSaleAddresses = async (
     accessToken,
     { limit: 100 }
   )
-  return checkResponse(result, '获取售后地址').address_id_list ?? []
+  if (result.errcode !== 0) {
+    throw new Error(`获取售后地址失败 [${result.errcode}]: ${result.errmsg}`)
+  }
+  return (result as any).address_id_list ?? []
 }
 
 // ============================================================

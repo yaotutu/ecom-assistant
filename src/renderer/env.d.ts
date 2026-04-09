@@ -147,6 +147,54 @@ interface PlatformAPI {
     data?: string
     error?: string
   }>
+
+  // ─── 淘宝 WebView 登录管理 ──────────────────────────
+
+  /** 检查淘宝登录状态 */
+  checkTaobaoLogin(): Promise<boolean>
+
+  /** 弹出淘宝登录窗口，登录成功返回 true */
+  taobaoLogin(): Promise<boolean>
+
+  /** 清除淘宝登录态（登出） */
+  taobaoLogout(): Promise<boolean>
+
+  /** 获取淘宝 session 摘要信息（调试用） */
+  getTaobaoSessionInfo(): Promise<{ cookieCount: number; hasLoginCookie: boolean }>
+
+  /**
+   * 上传已提取的商品数据到微信小店（浏览器标签页专用）
+   *
+   * @param product - 从 webview 提取的商品数据
+   * @param transformOptions - 微信小店转换选项
+   * @param listOptions - 上货选项
+   */
+  uploadExtractedProduct(
+    product: any,
+    transformOptions: any,
+    listOptions?: { autoList?: boolean }
+  ): Promise<{
+    success: boolean
+    data?: {
+      productId: string
+      images: { headImgUrls: string[]; descImgUrls: string[] }
+      autoListed: boolean
+      steps: Array<{ name: string; success: boolean; duration: number; detail?: string }>
+    }
+    error?: string
+  }>
+
+  /** 测试类目匹配（根据标题匹配微信小店类目） */
+  testCategoryMatch(title: string): Promise<{
+    success: boolean
+    data?: {
+      matched: boolean
+      categoryName?: string
+      categoryPath?: number[]
+      message?: string
+    }
+    error?: string
+  }>
 }
 
 interface Window {

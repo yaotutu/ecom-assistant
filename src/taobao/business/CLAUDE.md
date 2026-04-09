@@ -7,21 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #3745 | 3:15 PM | 🔴 | Added fallback for missing description images | ~191 |
-| #3744 | 3:14 PM | 🔴 | Fixed undefined imagePaths parameter in wechat-transform.ts transformToWechatInput function | ~228 |
-| #3743 | " | 🔴 | Implemented fallback for missing Taobao detail images in wechat-transform.ts | ~265 |
-| #3736 | 2:29 PM | 🔵 | Product detail data fetching issues identified | ~259 |
-| #3710 | 11:00 AM | 🔵 | Discovered yuanToCents utility function and its usage in wechat-transform.ts | ~210 |
-| #3709 | " | 🟣 | Implemented Taobao to WeChat Store data transformation pure functions | ~335 |
-| #3708 | 10:59 AM | 🔵 | Discovered existing wechat-transform.ts implementation with SKU transformation logic | ~258 |
-| #3704 | 10:57 AM | 🟣 | Taobao to WeChat Store data transformation layer implemented | ~263 |
-| #3693 | 10:48 AM | ⚖️ | Designed comprehensive architecture for Taobao to WeChat Store product migration feature | ~369 |
-| #3689 | 10:42 AM | 🔵 | Discovered significant gap between Taobao collection capabilities and WeChat Store requirements | ~378 |
 | #3686 | 10:38 AM | 🔵 | Reviewed Taobao business layer store search implementation pattern | ~275 |
-
-### Apr 9, 2026
-
-| ID | Time | T | Title | Read |
-|----|------|---|-------|------|
-| #3878 | 9:53 AM | 🔵 | Product detail parser uses pure functions to extract data from CLI text output with fallback strategies | ~487 |
 </claude-mem-context>

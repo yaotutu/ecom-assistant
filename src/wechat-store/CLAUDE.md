@@ -11,6 +11,22 @@
 | #3691 | " | 🔵 | WeChat Store REST API client implementation discovered | ~710 |
 | #3687 | 10:39 AM | 🔵 | Gap analysis completed between Taobao product data and WeChat Store upload requirements | ~434 |
 | #3672 | 10:29 AM | 🔵 | WeChat Store product listing implementation discovered | ~549 |
-| #3669 | 10:27 AM | 🟣 | Implemented WeChat Shop product listing orchestration workflow | ~369 |
-| #3667 | 10:25 AM | 🟣 | Implemented WeChat Shop API client with complete product upload workflow | ~428 |
+
+### Apr 9, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4148 | 3:54 PM | 🔴 | Fixed getFreightTemplates to handle WeChat API response with data at top level | ~298 |
+| #4145 | " | 🔴 | Fixed getAfterSaleAddresses API response parsing to handle data at top level instead of nested in data field | ~349 |
+| #4109 | 3:17 PM | 🟣 | Enhanced WeChat image upload to support GIF format with automatic PNG conversion using sharp | ~427 |
+| #4108 | " | 🟣 | Implemented automatic GIF to PNG conversion for WeChat store image uploads | ~165 |
+| #4107 | 3:16 PM | 🔴 | Added sharp library import to wechat-store/api-client.ts for image processing | ~166 |
+| #4105 | 3:11 PM | 🔵 | Reviewed WeChat store image upload implementation with automatic MIME type detection | ~399 |
+| #4104 | 3:08 PM | 🔵 | Reviewed WeChat store API client architecture for image upload and product management | ~179 |
+| #4090 | 2:45 PM | 🔴 | Fixed WeChat image upload API response parsing to handle pic_file nested structure | ~348 |
+| #4083 | 2:38 PM | 🟣 | Added debug logging to WeChat store image upload API to diagnose missing img_url response issue | ~347 |
+| #4081 | 2:29 PM | 🔴 | Fixed image upload filename extension bug in WeChat API client | ~332 |
+| #4075 | 2:26 PM | 🔵 | Reviewed WeChat store image dimension parsing logic for WebP and JPEG formats | ~364 |
+| #4074 | " | 🟣 | Enhanced image dimension reading to support WebP format with magic byte detection | ~423 |
+| #4065 | 2:17 PM | 🔵 | Reviewed WeChat store product lister orchestration module for upload integration | ~242 |
 </claude-mem-context>

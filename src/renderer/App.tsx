@@ -10,12 +10,14 @@ import {
   SearchOutlined,
   ThunderboltOutlined,
   CloudUploadOutlined,
+  ChromeOutlined,
 } from '@ant-design/icons'
 import zhCN from 'antd/locale/zh_CN'
 import StoreCollect from './tabs/StoreCollect'
 import StoreDiscover from './tabs/StoreDiscover'
 import AutoMode from './tabs/AutoMode'
 import OneClickList from './tabs/OneClickList'
+import TaobaoBrowser from './tabs/TaobaoBrowser'
 import './App.css'
 
 // ─── 类型 ──────────────────────────────────────
@@ -157,6 +159,15 @@ const App = () => {
                   </span>
                 ),
                 children: <OneClickList />,
+              },
+              {
+                key: 'browser',
+                label: (
+                  <span>
+                    <ChromeOutlined /> 淘宝浏览器
+                  </span>
+                ),
+                children: <TaobaoBrowser />,
               },
             ]}
           />
