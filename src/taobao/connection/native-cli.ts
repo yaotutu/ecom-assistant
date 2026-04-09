@@ -447,6 +447,33 @@ export class NativeCli {
     return allContent
   }
 
+  // ─── 商品详情获取 ──────────────────────────────────────
+
+  /** 导航到指定 URL（用于打开淘宝商品详情页） */
+  async navigateToUrl(url: string): Promise<any> {
+    return this.exec('navigate_to_url', { url })
+  }
+
+  /** 获取当前页面的 SKU 规格数据 */
+  async getProductSkus(): Promise<any> {
+    const tmp = this.tmpFile('skus_')
+    try {
+      return await this.exec('get_product_skus', {}, tmp)
+    } finally {
+      await safeUnlink(tmp)
+    }
+  }
+
+  /** 扫描当前页面的 DOM 元素（图片、按钮等结构化数据） */
+  async scanPageElements(): Promise<any> {
+    const tmp = this.tmpFile('elements_')
+    try {
+      return await this.exec('scan_page_elements', {}, tmp)
+    } finally {
+      await safeUnlink(tmp)
+    }
+  }
+
   // ─── 连接检查（UI 手动触发） ──────────────────────
 
   async ping(): Promise<{
