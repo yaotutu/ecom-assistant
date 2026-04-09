@@ -8,4 +8,10 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #3733 | 2:16 PM | ✅ | WeChat Store token management simplified with automatic retrieval from backend | ~689 |
+
+### Apr 9, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #3874 | 9:51 AM | 🔵 | Existing product fetcher orchestrates CLI-based data extraction workflow | ~453 |
 </claude-mem-context>

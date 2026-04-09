@@ -7,9 +7,6 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #3742 | 2:39 PM | 🟣 | Added raw data debugging to fetchProductDetail response | ~213 |
 | #3734 | 2:17 PM | ✅ | Refactored WeChat token handling to use environment variables | ~272 |
-| #3722 | 1:51 PM | 🟣 | Added "One-Click Upload" tab to main application UI for Taobao to WeChat Store workflow | ~260 |
-| #3720 | " | 🟣 | Added CloudUploadOutlined icon to App.tsx for OneClickList tab | ~187 |
-| #3719 | " | 🟣 | Added OneClickList component import to App.tsx | ~166 |
+| #3719 | 1:51 PM | 🟣 | Added OneClickList component import to App.tsx | ~166 |
 </claude-mem-context>
