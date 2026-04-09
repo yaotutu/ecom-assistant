@@ -4,10 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-电商助手（ecom-assistant）是一个基于 Electron + React 19 的桌面工具，通过淘宝桌面版的 native CLI 采集淘宝C店商品数据。提供三种工作模式：
-- **店铺采集**：给定店铺名，采集全店商品并按销量/价格过滤导出
-- **店铺发现**：输入关键字，搜索该品类最热门的店铺
-- **自动模式**：输入关键字，自动搜索热门店铺并依次采集全店商品
+电商助手（ecom-assistant）是一个基于 Electron + React 19 的桌面工具，提供两大核心功能：
+1. **淘宝数据采集**：通过淘宝桌面版的 native CLI 采集淘宝C店商品数据
+   - **店铺采集**：给定店铺名，采集全店商品并按销量/价格过滤导出
+   - **店铺发现**：输入关键字，搜索该品类最热门的店铺
+   - **自动模式**：输入关键字，自动搜索热门店铺并依次采集全店商品
+2. **微信小店里货**：将采集到的商品数据上传到微信小店
+   - 通过微信小店 REST API 完成图片上传、商品创建、审核上架的全流程
 
 ## 常用命令
 
@@ -42,7 +45,21 @@ src/
 │       └── AutoMode.tsx      # Tab3: 自动模式（布局就绪，逻辑 TODO）
 ├── core/                    # 跨平台共享类型
 │   └── types.ts             # IPlatform 接口及所有 DTO 类型
-└── taobao/                  # 淘宝平台实现
+├── taobao/                  # 淘宝平台实现
+│   ├── index.ts             # 统一导出 TaobaoPlatform
+│   ├── platform.ts          # TaobaoPlatform（IPlatform 实现，组合层）
+│   ├── connection/
+│   │   └── native-cli.ts    # NativeCli 封装（调用 taobao-native CLI 二进制）
+│   └── business/            # 纯函数层，无副作用，无状态
+│       ├── store-search.ts        # 店铺搜索结果提取（去重，保持原始顺序）
+│       ├── product-collector.ts   # 商品合并、过滤
+│       ├── sales-parser.ts        # 销量文本解析
+│       └── data-formatter.ts      # 导出文本格式化
+└── wechat-store/            # 微信小店上货模块
+    ├── index.ts              # 统一导出
+    ├── types.ts              # 类型定义（ProductInput、AddProductRequest 等）
+    ├── api-client.ts         # API 客户端（封装所有微信小店 HTTP 请求）
+    └── product-lister.ts     # 上货流程编排（上传图片→添加商品→上架）
     ├── index.ts             # 统一导出 TaobaoPlatform
     ├── platform.ts          # TaobaoPlatform（IPlatform 实现，组合层）
     ├── connection/
@@ -126,3 +143,41 @@ NativeCli 心跳循环（30s）:
 - UI 组件使用 antd 组件库，避免自定义 CSS 实现已有组件
 - 中文注释，IPC 通道名采用 `platform:动作` 格式
 - 类型定义集中在 `src/core/types.ts`（后端）和 `src/renderer/env.d.ts`（前端），不与实现混放
+
+### 微信小店上货模块（src/wechat-store/）
+
+**设计思路**：模块分为三层
+1. `types.ts` — 纯类型定义，不含逻辑
+2. `api-client.ts` — 纯 HTTP 调用，一个函数对应一个微信 API 端点
+3. `product-lister.ts` — 流程编排，将多步 API 调用串联成完整的上货流程
+
+**数据流**：
+```
+商品信息采集模块（待开发）
+        │
+        ▼ ProductInput（标准输入格式）
+  product-lister.ts
+    ├── uploadImage() → 图片本地路径 → mmecimage URL
+    ├── getAfterSaleAddresses() → 获取售后地址
+    ├── buildProductRequest() → ProductInput → AddProductRequest
+    ├── addProduct() → 提交商品（草稿状态）
+    └── listProduct() → 提交审核上架
+```
+
+**API 端点汇总**：
+| 功能 | 方法 | 路径 |
+|------|------|------|
+| 上传图片 | POST | `/shop/ec/basics/img/upload` |
+| 获取所有类目 | GET | `/channels/ec/category/all` |
+| 获取类目详情 | POST | `/shop/ec/category/detail` |
+| 获取运费模板 | POST | `/channels/ec/merchant/getfreighttemplatelist` |
+| 获取售后地址 | POST | `/channels/ec/merchant/address/list` |
+| 添加商品 | POST | `/channels/ec/product/add` |
+| 上架商品 | POST | `/channels/ec/product/listing` |
+
+**注意事项**：
+- access_token 由调用方管理（获取/刷新/缓存），本模块不处理
+- 所有图片必须先通过 uploadImage 上传，返回的 mmecimage.cn/p/ 链接才能用于商品 API
+- 价格单位统一为「分」（如 990 = 9.90 元）
+- 商品添加后为草稿状态，需调用 listProduct 提交审核才正式生效
+- 商品上架后不可修改一级类目
