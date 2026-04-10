@@ -33,6 +33,9 @@ interface PlatformAPI {
   /** 手动检查连接（fallback，心跳会自动推送状态） */
   checkConnection(): Promise<ConnectionResult>
 
+  /** 跳过检测，直接标记为已连接 */
+  skipConnection(): Promise<{ status: 'connected'; message: string }>
+
   /**
    * 订阅连接状态变更（主进程心跳推送）
    * 返回取消订阅函数
@@ -42,6 +45,7 @@ interface PlatformAPI {
       status: 'connected' | 'disconnected' | 'error' | 'checking'
       message: string
       suggestion?: string
+      command?: string
     }) => void
   ): () => void
 

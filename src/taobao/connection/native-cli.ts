@@ -25,8 +25,8 @@ const TIMEOUT_MS = 120_000
 const PAGE_SLEEP_MS = 2_000
 const HEARTBEAT_DEFAULT_MS = 30_000
 
-// TODO: 临时禁用连接检测，开发完成后改回 false
-const SKIP_CONNECTION_CHECK = true
+const MAX_DETECT_RETRIES = 10
+const RETRY_INTERVAL_MS = 10_000
 
 // ============================================================
 // 类型
@@ -157,6 +157,10 @@ export class NativeCli {
   private listeners = new Set<StateListener>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private win: BrowserWindow | null = null
+  private detecting = false
+  private lastMessage = ''
+  private lastSuggestion: string | undefined
+  private detectCommand = ''
 
   constructor() {
     this.cliPaths = getCliPaths()
@@ -170,40 +174,139 @@ export class NativeCli {
    * 启动连接检测服务（主进程调用一次）
    *
    * - 注册 platform:check-connection IPC handler
-   * - 启动心跳循环，状态变更自动推送到渲染进程
+   * - 启动初始检测（带重试）
+   * - 检测成功后自动启动心跳循环
    */
   startDetection(mainWindow: BrowserWindow): void {
     this.win = mainWindow
 
-    // 手动检测 handler
+    // 检测/重试 handler
     ipcMain.handle('platform:check-connection', async () => {
-      const pingResult = await this.ping()
-      if (pingResult.ok) {
-        return { status: 'connected', message: pingResult.message }
+      // 已连接：返回当前状态
+      if (this.connState === 'healthy') {
+        return { status: 'connected', message: this.lastMessage }
       }
-      return { status: 'disconnected', message: pingResult.message, suggestion: pingResult.suggestion }
+      // 检测进行中：返回 checking
+      if (this.detecting) {
+        return { status: 'checking', message: '正在检测淘宝桌面版连接...' }
+      }
+      // 未连接且未检测中：触发重新检测
+      this.initialDetection()
+      return { status: 'checking', message: '正在检测淘宝桌面版连接...' }
     })
 
-    // 启动心跳
+    // 跳过检测 handler
+    ipcMain.handle('platform:skip-connection', async () => {
+      this.skipDetection()
+      return { status: 'connected', message: '已跳过检测（淘宝 CLI 功能不可用）' }
+    })
+
+    // 启动初始检测
+    this.initialDetection()
+  }
+
+  /** 跳过检测，直接标记为已连接（不启动心跳） */
+  skipDetection(): void {
+    this.detecting = false
+    this.stopHeartbeat()
+    this.transitionTo('healthy', {
+      state: 'healthy',
+      message: '已跳过检测（淘宝 CLI 功能不可用）',
+    })
+  }
+
+  /** 停止连接检测（应用退出时调用） */
+  stopDetection(): void {
+    this.detecting = false
+    this.stopHeartbeat()
+    this.win = null
+  }
+
+  /**
+   * 初始检测：最多重试 MAX_DETECT_RETRIES 次
+   *
+   * 流程：
+   * 1. 检查 CLI 二进制是否存在（只查一次）
+   * 2. 调用 get_current_tab 检测执行层是否就绪
+   * 3. 就绪 → 标记 healthy，启动心跳
+   * 4. 未就绪 → 等 10s 重试，最多 10 次
+   * 5. 全部失败 → 标记 disconnected，提示用户重启
+   */
+  private async initialDetection(): Promise<void> {
+    this.detecting = true
+    this.stopHeartbeat()
+
+    // 第一步：查找 CLI 路径并解析为绝对路径（只做一次）
+    let cliPath: string
+    try {
+      cliPath = await this.resolveCliPath()
+      this.detectCommand = `${cliPath} get_current_tab --args '{"sourceApp":"copaw"}'`
+    } catch {
+      this.detectCommand = ''
+      this.transitionTo('disconnected', {
+        state: 'disconnected',
+        message: '淘宝桌面版未安装或 CLI 不可用',
+        suggestion: '请确认淘宝桌面版已安装，并重启本工具。',
+      })
+      this.detecting = false
+      return
+    }
+
+    this.pushToRenderer('checking', '正在检测淘宝桌面版连接...', undefined, this.detectCommand)
+
+    // 第二步：执行层是否就绪（最多重试 MAX_DETECT_RETRIES 次）
+    for (let attempt = 1; attempt <= MAX_DETECT_RETRIES; attempt++) {
+      if (!this.detecting) return // 被中止（用户点击重试）
+
+      try {
+        const start = Date.now()
+        await this.execPing()
+        const latencyMs = Date.now() - start
+        this.transitionTo('healthy', {
+          state: 'healthy',
+          message: `已连接淘宝桌面版 (${latencyMs}ms)`,
+          latencyMs,
+        })
+        this.startHeartbeat()
+        this.detecting = false
+        return
+      } catch {
+        if (attempt < MAX_DETECT_RETRIES && this.detecting) {
+          this.pushToRenderer('checking',
+            `正在等待淘宝桌面版启动... (${attempt}/${MAX_DETECT_RETRIES})`,
+            undefined, this.detectCommand)
+          await sleep(RETRY_INTERVAL_MS)
+        }
+      }
+    }
+
+    // 所有重试均失败
+    if (!this.detecting) return
+    this.transitionTo('disconnected', {
+      state: 'disconnected',
+      message: '淘宝桌面版连接失败，请重启淘宝桌面版',
+      suggestion: '请重启淘宝桌面版，然后点击「重新检测」。',
+    })
+    this.detecting = false
+  }
+
+  /** 启动心跳循环（仅在检测成功后调用） */
+  private startHeartbeat(): void {
     this.stopHeartbeat()
     this.heartbeatTick()
     this.heartbeatTimer = setInterval(() => this.heartbeatTick(), HEARTBEAT_DEFAULT_MS)
   }
 
-  /** 停止连接检测（应用退出时调用） */
-  stopDetection(): void {
-    this.stopHeartbeat()
-    this.win = null
+  /** 直接推送状态到渲染进程（不经过状态机 prev===state 判断） */
+  private pushToRenderer(status: string, message: string, suggestion?: string, command?: string): void {
+    if (this.win && !this.win.isDestroyed()) {
+      this.win.webContents.send('platform:connection-status', { status, message, suggestion, command })
+    }
   }
 
   /** 获取当前连接状态 */
   get state(): ConnState {
     return this.connState
-  }
-
-  /** 是否已跳过检测（开发模式） */
-  get isCheckSkipped(): boolean {
-    return SKIP_CONNECTION_CHECK
   }
 
   /** 订阅连接状态变更 */
@@ -212,25 +315,18 @@ export class NativeCli {
     return () => { this.listeners.delete(cb) }
   }
 
-  /** 手动检测（ping） */
+  /** 手动检测（ping）— 单次检测，不重试 */
   async ping(): Promise<{
     ok: boolean
     message: string
     suggestion?: string
     latencyMs?: number
   }> {
-    if (SKIP_CONNECTION_CHECK) {
-      this.transitionTo('healthy', { state: 'healthy', message: '已连接淘宝桌面版（检测已跳过）' })
-      return { ok: true, message: '已连接淘宝桌面版（检测已跳过）' }
-    }
-
     // 第一步：CLI 二进制是否存在
     try {
       await this.execHelp()
     } catch {
-      const result = { ok: false, message: '淘宝桌面版未安装或 CLI 不可用', suggestion: '请确认淘宝桌面版已安装，并重启本工具。' }
-      this.transitionTo('disconnected', { state: 'disconnected', message: result.message, suggestion: result.suggestion })
-      return result
+      return { ok: false, message: '淘宝桌面版未安装或 CLI 不可用', suggestion: '请确认淘宝桌面版已安装，并重启本工具。' }
     }
 
     // 第二步：执行层是否就绪
@@ -238,13 +334,9 @@ export class NativeCli {
       const start = Date.now()
       await this.execPing()
       const latencyMs = Date.now() - start
-      const msg = `已连接淘宝桌面版 (${latencyMs}ms)`
-      this.transitionTo('healthy', { state: 'healthy', message: msg, latencyMs })
-      return { ok: true, message: msg, latencyMs }
+      return { ok: true, message: `已连接淘宝桌面版 (${latencyMs}ms)`, latencyMs }
     } catch (err: any) {
-      const suggestion = err.suggestion ?? '请重启淘宝桌面版，然后点击「重新检测」。'
-      this.transitionTo('disconnected', { state: 'disconnected', message: '淘宝桌面版连接已断开', suggestion })
-      return { ok: false, message: err.message, suggestion }
+      return { ok: false, message: err.message, suggestion: err.suggestion }
     }
   }
 
@@ -258,11 +350,6 @@ export class NativeCli {
   }
 
   private async heartbeatTick(): Promise<void> {
-    if (SKIP_CONNECTION_CHECK) {
-      this.transitionTo('healthy', { state: 'healthy', message: '已连接淘宝桌面版（检测已跳过）' })
-      return
-    }
-
     try {
       const start = Date.now()
       await this.execPing()
@@ -285,6 +372,8 @@ export class NativeCli {
   private transitionTo(state: ConnState, change: ConnStateChange): void {
     const prev = this.connState
     this.connState = state
+    this.lastMessage = change.message
+    this.lastSuggestion = change.suggestion
 
     if (prev === state) return
 
@@ -300,9 +389,50 @@ export class NativeCli {
           : state === 'unknown' ? 'checking'
           : 'disconnected',
         message: change.message,
+        command: this.detectCommand || undefined,
         suggestion: change.suggestion,
       })
     }
+  }
+
+  // ─── CLI 路径解析 ──────────────────────────────────
+
+  /**
+   * 查找可用的 CLI 路径并解析为绝对路径
+   * 遍历候选路径列表，返回第一个可用的完整路径
+   */
+  private async resolveCliPath(): Promise<string> {
+    for (const cliPath of this.cliPaths) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          execFile(cliPath, ['--help'], { timeout: 10_000 }, (error) => {
+            if (error) reject(error)
+            else resolve()
+          })
+        })
+        // 已是绝对路径（Unix /开头 或 Windows 盘符开头），直接返回
+        if (cliPath.startsWith('/') || /^[A-Z]:/i.test(cliPath)) return cliPath
+        // 相对路径（如 taobao-native）：通过 which/where 解析完整路径
+        return await this.whichResolve(cliPath)
+      } catch (err: any) {
+        if (!/ENOENT|not found|spawn/i.test(err.message)) break
+      }
+    }
+    throw new Error('未找到 CLI')
+  }
+
+  /** 通过 which/where 命令解析 CLI 的完整绝对路径 */
+  private whichResolve(cmd: string): Promise<string> {
+    return new Promise((resolve) => {
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which'
+      execFile(whichCmd, [cmd], { timeout: 5_000 }, (error, stdout) => {
+        if (error || !stdout.trim()) {
+          resolve(cmd) // 解析失败，返回原始命令名
+        } else {
+          resolve(stdout.trim().split('\n')[0])
+        }
+      })
+    })
   }
 
   // ─── CLI 探测（只用于检测，不做业务） ──────────────
@@ -351,7 +481,7 @@ export class NativeCli {
     args: Record<string, unknown>,
     outputFile?: string
   ): Promise<any> {
-    if (!SKIP_CONNECTION_CHECK && this.connState === 'disconnected') {
+    if (this.connState === 'disconnected') {
       throw new Error('淘宝桌面版连接已断开，请重启淘宝桌面版后点击「重新检测」')
     }
 

@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('platformAPI', {
     return ipcRenderer.invoke('platform:check-connection')
   },
 
+  /** 跳过检测，直接标记为已连接 */
+  skipConnection(): Promise<{
+    status: 'connected'
+    message: string
+  }> {
+    return ipcRenderer.invoke('platform:skip-connection')
+  },
+
   /**
    * 订阅连接状态变更（主进程心跳推送）
    * 返回取消订阅函数
@@ -23,6 +31,7 @@ contextBridge.exposeInMainWorld('platformAPI', {
       status: 'connected' | 'disconnected' | 'error' | 'checking'
       message: string
       suggestion?: string
+      command?: string
     }) => void
   ): () => void {
     const handler = (
