@@ -1,27 +1,152 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #333; }
 
-/* ─── 主布局 ─────────────────────── */
-.app { max-width: 1100px; margin: 0 auto; padding: 24px; }
-
-/* ─── 头部 ───────────────────────── */
-.header {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 20px;
+/* ═══════════════════════════════════════════════
+   主布局：侧边栏 + 内容区
+   ═══════════════════════════════════════════════ */
+.app-layout {
+  height: 100vh;
+  display: flex;
+  background: #f0f2f5;
 }
-.header h1 { font-size: 18px; font-weight: 600; margin: 0; }
-.conn-status {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; padding: 5px 14px; border-radius: 14px;
-  cursor: pointer; user-select: none; transition: all 0.2s;
-}
-.conn-status:hover { filter: brightness(0.95); }
-.conn-status.connected { background: #f0fdf4; color: #16a34a; }
-.conn-status.disconnected { background: #fef2f2; color: #dc2626; }
-.conn-status.error { background: #fef2f2; color: #dc2626; }
-.conn-status.checking { background: #eff6ff; color: #2563eb; }
 
-/* ─── 表单行布局 ─────────────────── */
+/* ─── 侧边栏 ──────────────────────────── */
+.app-sider {
+  background: #fff !important;
+  border-right: 1px solid #e8e8e8;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  /* 去掉 antd Sider 默认的 toggle 按钮区域 */
+  padding-bottom: 0 !important;
+}
+
+/* Logo + 标题区域 */
+.sider-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+.sider-logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.sider-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+  letter-spacing: 1px;
+}
+
+/* 导航菜单 — 白底主题覆盖 */
+.sider-menu {
+  flex: 1;
+  border-right: none !important;
+  padding: 8px 0;
+  background: transparent !important;
+}
+/* 菜单项 */
+.sider-menu .ant-menu-item {
+  height: 44px !important;
+  line-height: 44px !important;
+  margin: 2px 8px !important;
+  border-radius: 8px !important;
+  color: #666 !important;
+  font-size: 14px !important;
+}
+.sider-menu .ant-menu-item .anticon {
+  font-size: 16px !important;
+}
+.sider-menu .ant-menu-item:hover {
+  background: #f5f5f5 !important;
+  color: #333 !important;
+}
+/* 选中项 */
+.sider-menu .ant-menu-item-selected {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: #fff !important;
+  font-weight: 500 !important;
+}
+.sider-menu .ant-menu-item-selected .anticon {
+  color: #fff !important;
+}
+/* 去掉 antd 默认的左侧选中边框 */
+.sider-menu .ant-menu-item-selected::after {
+  display: none;
+}
+
+/* 底部连接状态 */
+.sider-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+.conn-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 12px;
+}
+.conn-badge:hover {
+  background: #f5f5f5;
+}
+.conn-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.conn-connected .conn-label { color: #52c41a; }
+.conn-disconnected .conn-label { color: #ff4d4f; }
+.conn-error .conn-label { color: #ff4d4f; }
+.conn-checking .conn-label { color: #1677ff; }
+
+/* ─── 内容区 ──────────────────────────── */
+.app-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f0f2f5;
+}
+
+/* 顶部标题栏 */
+.content-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+.content-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+/* 内容主体 */
+.content-body {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+}
+
+/* ─── 表单行布局（供各标签页复用） ────── */
 .tab-panel { min-height: 400px; }
 .form-row { display: flex; align-items: center; gap: 10px; }
 .field-label { font-size: 14px; font-weight: 500; white-space: nowrap; }

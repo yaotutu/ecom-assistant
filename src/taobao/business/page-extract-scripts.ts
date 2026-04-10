@@ -13,6 +13,7 @@
  */
 
 import type { TaobaoProductDetail, TaobaoProductSku } from '../types'
+import { stripSizeSuffix, normalizeImageUrl } from './image-utils'
 
 // ============================================================
 // 注入脚本：提取商品核心数据
@@ -334,22 +335,14 @@ export const parseExtractedData = (
     _descUrl?: string
   }
 
-  // 清理图片 URL — 去掉尺寸后缀，获取原图
-  const cleanUrl = (u: string): string => {
-    return u
-      .replace(/_\d+x\d+\.\w+$/i, '')
-      .replace(/\.jpg_q\d+\.jpg_\.webp$/i, '.jpg')
-      .replace(/\.webp$/i, '.jpg')
-  }
-
   return {
     title: data.title || '',
     itemId: data.itemId || '',
     price: data.price || '',
     shopName: data.shopName || '',
     description: data.description || '',
-    headImageUrls: data.headImageUrls.map(cleanUrl),
-    descImageUrls: data.descImageUrls.map(cleanUrl),
+    headImageUrls: data.headImageUrls.map(stripSizeSuffix),
+    descImageUrls: data.descImageUrls.map(stripSizeSuffix),
     skus: data.skus,
     sourceUrl: url,
   }
@@ -360,11 +353,5 @@ export const parseExtractedData = (
  */
 export const parseDescImages = (jsonStr: string): string[] => {
   const data = JSON.parse(jsonStr) as { descImageUrls: string[] }
-  return (data.descImageUrls || []).map((u) => {
-    if (u.startsWith('//')) return 'https:' + u
-    return u
-      .replace(/_\d+x\d+\.\w+$/i, '')
-      .replace(/\.jpg_q\d+\.jpg_\.webp$/i, '.jpg')
-      .replace(/\.webp$/i, '.jpg')
-  })
+  return (data.descImageUrls || []).map((u) => stripSizeSuffix(normalizeImageUrl(u)))
 }

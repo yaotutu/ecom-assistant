@@ -7,5 +7,41 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #3745 | 3:15 PM | 🔴 | Added fallback for missing description images | ~191 |
+| #3744 | 3:14 PM | 🔴 | Fixed undefined imagePaths parameter in wechat-transform.ts transformToWechatInput function | ~228 |
+| #3743 | " | 🔴 | Implemented fallback for missing Taobao detail images in wechat-transform.ts | ~265 |
+| #3736 | 2:29 PM | 🔵 | Product detail data fetching issues identified | ~259 |
+| #3710 | 11:00 AM | 🔵 | Discovered yuanToCents utility function and its usage in wechat-transform.ts | ~210 |
+| #3709 | " | 🟣 | Implemented Taobao to WeChat Store data transformation pure functions | ~335 |
+| #3708 | 10:59 AM | 🔵 | Discovered existing wechat-transform.ts implementation with SKU transformation logic | ~258 |
+| #3704 | 10:57 AM | 🟣 | Taobao to WeChat Store data transformation layer implemented | ~263 |
+| #3693 | 10:48 AM | ⚖️ | Designed comprehensive architecture for Taobao to WeChat Store product migration feature | ~369 |
+| #3689 | 10:42 AM | 🔵 | Discovered significant gap between Taobao collection capabilities and WeChat Store requirements | ~378 |
 | #3686 | 10:38 AM | 🔵 | Reviewed Taobao business layer store search implementation pattern | ~275 |
+
+### Apr 9, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4234 | 6:15 PM | 🔵 | Located existing category matching functions: matchCategoryByTitle and getAllCategories | ~363 |
+| #4223 | 5:45 PM | 🟣 | Implemented automatic Taobao-to-WeChat category matching from product titles | ~421 |
+| #4198 | 5:01 PM | 🔵 | Reviewed automatic Taobao to WeChat store category matching algorithm | ~541 |
+| #4185 | 4:45 PM | 🟣 | Implemented automatic Taobao to WeChat store category matching in upload workflow | ~486 |
+| #4169 | 4:17 PM | 🔵 | Reviewed wechat-transform.ts to understand product data transformation and validation rules | ~255 |
+| #4166 | 4:14 PM | 🔵 | Reviewed wechat-transform.ts for Taobao to WeChat store product data transformation logic | ~525 |
+| #4162 | 4:13 PM | 🔵 | Discovered category path configuration across WeChat store integration | ~375 |
+| #4160 | 4:12 PM | 🔵 | Reviewed wechat-transform.ts product data transformation layer between Taobao and WeChat store | ~644 |
+| #4071 | 2:24 PM | 🔵 | Reviewed existing image-downloader.ts implementation for Taobao product image downloads | ~556 |
+| #4027 | 11:46 AM | 🔵 | Located existing image download and WeChat transformation utilities for WebView integration | ~402 |
+| #4026 | " | 🔵 | Reviewed image-downloader.ts for Taobao CDN image download implementation | ~389 |
+| #3933 | 10:19 AM | 🟣 | WebView-based Taobao authentication and product fetching system implementation completed | ~789 |
+| #3878 | 9:53 AM | 🔵 | Product detail parser uses pure functions to extract data from CLI text output with fallback strategies | ~487 |
+
+### Apr 10, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4381 | 1:22 PM | ✅ | Removed Taobao category scraper file after pivoting to LLM approach | ~195 |
+| #4256 | 9:22 AM | 🔵 | Discovered taobao-category-scraper.ts using webview mtop API framework for category tree extraction | ~468 |
+| #4247 | 9:12 AM | 🟣 | Taobao to WeChat Category Matcher Module Implemented | ~480 |
 </claude-mem-context>

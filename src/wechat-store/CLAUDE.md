@@ -10,12 +10,13 @@
 | #3692 | 10:44 AM | 🔵 | WeChat Store module architecture revealed | ~680 |
 | #3691 | " | 🔵 | WeChat Store REST API client implementation discovered | ~710 |
 | #3687 | 10:39 AM | 🔵 | Gap analysis completed between Taobao product data and WeChat Store upload requirements | ~434 |
-| #3672 | 10:29 AM | 🔵 | WeChat Store product listing implementation discovered | ~549 |
 
 ### Apr 9, 2026
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #4232 | 6:14 PM | 🔵 | Reviewed WeChat store type definitions for API response structures and category hierarchy | ~258 |
+| #4221 | 5:35 PM | 🔴 | Fixed getAllCategories API response parsing with inline error handling | ~354 |
 | #4148 | 3:54 PM | 🔴 | Fixed getFreightTemplates to handle WeChat API response with data at top level | ~298 |
 | #4145 | " | 🔴 | Fixed getAfterSaleAddresses API response parsing to handle data at top level instead of nested in data field | ~349 |
 | #4109 | 3:17 PM | 🟣 | Enhanced WeChat image upload to support GIF format with automatic PNG conversion using sharp | ~427 |

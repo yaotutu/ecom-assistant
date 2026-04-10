@@ -140,8 +140,9 @@ contextBridge.exposeInMainWorld('platformAPI', {
     )
   },
 
-  /** 测试类目匹配 */
-  testCategoryMatch(title: string): Promise<any> {
-    return ipcRenderer.invoke('wechat:test-category-match', title)
+  /** 测试类目匹配（支持传入淘宝面包屑类目名） */
+  testCategoryMatch(title: string, categoryNames?: string[]): Promise<any> {
+    return ipcRenderer.invoke('wechat:test-category-match', title, categoryNames)
   },
+
 })

@@ -45,42 +45,7 @@ import {
   listProduct,
   getAfterSaleAddresses,
 } from './api-client'
-
-// ============================================================
-// 工具函数
-// ============================================================
-
-/**
- * 计时工具 — 记录异步操作的耗时
- *
- * @param fn - 要执行的异步函数
- * @returns { result, duration } — 函数返回值和耗时（毫秒）
- */
-const timed = async <T>(fn: () => Promise<T>): Promise<{ result: T; duration: number }> => {
-  const start = Date.now()
-  const result = await fn()
-  return { result, duration: Date.now() - start }
-}
-
-/**
- * 创建一个已完成的步骤记录
- */
-const successStep = (name: string, duration: number, detail?: string): ListProductStep => ({
-  name,
-  success: true,
-  duration,
-  detail,
-})
-
-/**
- * 创建一个失败的步骤记录
- */
-const failStep = (name: string, duration: number, error: string): ListProductStep => ({
-  name,
-  success: false,
-  duration,
-  detail: error,
-})
+import { timed, ok, fail } from '../shared/utils'
 
 // ============================================================
 // 图片批量上传
@@ -111,7 +76,7 @@ const uploadImages = async (
       uploadImage(accessToken, filePath)
     )
     urls.push(imgUrl)
-    steps.push(successStep(`${stepName}: ${filePath}`, duration, imgUrl))
+    steps.push(ok(`${stepName}: ${filePath}`, duration, imgUrl))
   }
 
   return { urls, steps }
@@ -292,7 +257,7 @@ export const listProductToStore = async (
           uploadImage(accessToken, sku.imagePath!)
         )
         skuImgUrls[i] = url
-        pushStep(successStep(`上传 SKU 图 #${i}`, duration, url))
+        pushStep(ok(`上传 SKU 图 #${i}`, duration, url))
       }
     }
 
@@ -306,7 +271,7 @@ export const listProductToStore = async (
         throw new Error('未指定售后地址且店铺没有可用的售后地址，请先在微信小店后台添加售后地址')
       }
       afterSaleAddressId = Number(addresses[0])
-      pushStep(successStep('获取售后地址', duration, `使用地址 ID: ${afterSaleAddressId}`))
+      pushStep(ok('获取售后地址', duration, `使用地址 ID: ${afterSaleAddressId}`))
     }
 
     // ---- 步骤 5：构建请求体 ----
@@ -316,13 +281,13 @@ export const listProductToStore = async (
       skuImgUrls,
       afterSaleAddressId,
     })
-    pushStep(successStep('构建请求体', 0))
+    pushStep(ok('构建请求体', 0))
 
     // ---- 步骤 6：提交添加商品 ----
     const { result: addResult, duration: addDuration } = await timed(() =>
       addProduct(accessToken, requestBody)
     )
-    pushStep(successStep('添加商品', addDuration, `product_id: ${addResult.product_id}`))
+    pushStep(ok('添加商品', addDuration, `product_id: ${addResult.product_id}`))
 
     // ---- 步骤 7：可选 - 提交审核上架 ----
     let listed = false
@@ -331,7 +296,7 @@ export const listProductToStore = async (
         listProduct(accessToken, addResult.product_id)
       )
       listed = true
-      pushStep(successStep('提交上架审核', listDuration))
+      pushStep(ok('提交上架审核', listDuration))
     }
 
     return {
@@ -344,7 +309,7 @@ export const listProductToStore = async (
   } catch (err) {
     // 捕获异常，返回失败结果
     const errorMsg = err instanceof Error ? err.message : String(err)
-    pushStep(failStep('上货流程', 0, errorMsg))
+    pushStep(fail('上货流程', 0, errorMsg))
 
     return {
       success: false,

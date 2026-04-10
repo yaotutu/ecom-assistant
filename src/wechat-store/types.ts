@@ -416,17 +416,8 @@ export interface ListProductResult {
   steps: ListProductStep[]
 }
 
-/** 单个步骤的执行结果 */
-export interface ListProductStep {
-  /** 步骤名称 */
-  name: string
-  /** 是否成功 */
-  success: boolean
-  /** 耗时（毫秒） */
-  duration: number
-  /** 详情/错误信息 */
-  detail?: string
-}
+/** 单个步骤的执行结果（兼容别名，底层使用统一的 Step 类型） */
+export type ListProductStep = import('../core/types').Step
 
 // ============================================================
 // 上货选项

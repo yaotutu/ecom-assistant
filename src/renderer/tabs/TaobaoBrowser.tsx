@@ -521,7 +521,7 @@ const TaobaoBrowser = () => {
     setCategoryMatching(true)
     setCategoryMatchResult(null)
     try {
-      const res = await window.platformAPI.testCategoryMatch(product.title)
+      const res = await window.platformAPI.testCategoryMatch(product.title, product.categoryNames)
       setCategoryMatchResult(res.data ?? { matched: false, message: '无返回数据' })
       if (res.data?.matched) {
         message.success(`匹配到: ${res.data.categoryName}`)
@@ -577,7 +577,7 @@ const TaobaoBrowser = () => {
   // ─── 渲染 ──────────────────────────────
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px - 40px)', margin: -20, marginTop: -20 }}>
       {/* ─── 顶部：导航栏 ──────────────── */}
       <div style={{ padding: '8px 12px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
         <Space style={{ width: '100%' }} size="small">

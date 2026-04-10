@@ -23,12 +23,12 @@ export class TaobaoPlatform implements IPlatform {
     this.cli = new NativeCli()
   }
 
-  /** 暴露底层 CLI 实例（供 ipc-handlers 注册心跳监听器） */
+  /** 暴露底层 CLI 实例 */
   get nativeCli(): NativeCli {
     return this.cli
   }
 
-  // ─── 连接管理（最核心） ───────────────────────────
+  // ─── 连接管理 ──────────────────────────────────────
 
   async checkConnection(): Promise<ConnectionCheckResult> {
     const ping = await this.cli.ping()

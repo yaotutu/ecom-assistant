@@ -13,5 +13,5 @@
  */
 
 export { getTaobaoSession, checkLoginStatus, clearTaobaoSession, getSessionSummary } from './session-manager'
-export { showLoginWindow, ensureLoggedIn } from './login-window'
+export { showLoginWindow, ensureLoggedIn, isLoginPage } from './login-window'
 export { RateLimiter, getChromeUserAgent, randomDelay, generateScrollSequence } from './anti-detection'

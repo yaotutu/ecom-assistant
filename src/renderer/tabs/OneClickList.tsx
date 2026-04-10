@@ -14,7 +14,10 @@ const { Text, Paragraph } = Typography
 
 // ─── 类型 ──────────────────────────────────────
 
-/** 淘宝商品详情（从 IPC 返回） */
+/**
+ * 淘宝商品详情（从 IPC fetchProductDetail 返回的 detail 字段）
+ * 对应后端 taobao/types.ts#TaobaoProductDetail
+ */
 interface TaobaoDetail {
   title: string
   itemId: string
@@ -32,7 +35,7 @@ interface TaobaoDetail {
   sourceUrl: string
 }
 
-/** CLI 原始数据源（调试用） */
+/** IPC 返回的原始数据源（调试用） */
 interface RawDataSource {
   pageContent: string
   elementsData: any

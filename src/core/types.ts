@@ -57,6 +57,23 @@ export interface CollectStoreResult {
 }
 
 /**
+ * 单个步骤的执行结果（通用）
+ *
+ * 用于淘宝商品获取、微信小店上货等流程中的步骤记录。
+ * 替代原先在 taobao/types.ts（FetchStep）和 wechat-store/types.ts（ListProductStep）中的重复定义。
+ */
+export interface Step {
+  /** 步骤名称 */
+  name: string
+  /** 是否成功 */
+  success: boolean
+  /** 耗时（毫秒） */
+  duration: number
+  /** 详情/错误信息 */
+  detail?: string
+}
+
+/**
  * 平台接口 — 所有电商平台必须实现
  *
  * 连接管理是核心中的核心：

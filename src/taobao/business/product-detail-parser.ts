@@ -32,6 +32,7 @@
  */
 
 import type { TaobaoProductDetail, TaobaoProductSku } from '../types'
+import { stripSizeSuffix } from './image-utils'
 
 // ============================================================
 // URL 解析
@@ -256,28 +257,6 @@ export const extractDescImageUrls = (
   }
 
   return urls.slice(0, 20)
-}
-
-/**
- * 去掉淘宝图片 URL 的尺寸后缀，获取原图
- *
- * 示例：
- * - xxx.jpg_q50.jpg_.webp → xxx.jpg
- * - xxx.jpg_400x400.jpg → xxx.jpg
- *
- * @param url - 原始图片 URL
- * @returns 去掉尺寸后缀的 URL
- */
-const stripSizeSuffix = (url: string): string => {
-  // 去掉 _q50.jpg_.webp、_400x400.jpg 等后缀
-  return url
-    .replace(/\.jpg_q\d+\.jpg_\.webp$/i, '.jpg')
-    .replace(/\.jpg_\d+x\d+\.jpg$/i, '.jpg')
-    .replace(/_\d+x\d+\.\w+$/i, match => {
-      // 仅去掉尺寸后缀，保留原始扩展名
-      const ext = match.match(/\.\w+$/)?.[0]
-      return ext ?? ''
-    })
 }
 
 // ============================================================

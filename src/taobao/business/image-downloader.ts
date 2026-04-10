@@ -17,44 +17,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-
-// ============================================================
-// URL 处理
-// ============================================================
-
-/**
- * 标准化图片 URL
- *
- * 处理淘宝图片 URL 的常见格式：
- * 1. 协议相对路径："//img.alicdn.com/..." → "https://img.alicdn.com/..."
- * 2. 已有协议：直接使用
- * 3. 空值/null：返回空字符串
- *
- * @param url - 原始图片 URL
- * @returns 标准化后的完整 URL
- */
-const normalizeImageUrl = (url: string): string => {
-  if (!url) return ''
-  if (url.startsWith('//')) return `https:${url}`
-  return url
-}
-
-/**
- * 去除淘宝图片 URL 的尺寸后缀，获取原图
- *
- * 淘宝图片 URL 通常包含尺寸参数：
- * - https://img.alicdn.com/imgextra/xxx_400x400.jpg → 原图
- * - https://img.alicdn.com/imgextra/xxx.jpg_80x80.jpg → 原图
- *
- * 去除 _数字x数字 模式可以获取更高质量的原图，
- * 微信小店要求主图 800x800 像素以上。
- *
- * @param url - 淘宝图片 URL
- * @returns 去除尺寸后缀的 URL
- */
-const stripSizeSuffix = (url: string): string => {
-  return url.replace(/_\d+x\d+(\.\w+)?$/, '$1')
-}
+import { stripSizeSuffix, normalizeImageUrl } from './image-utils'
 
 // ============================================================
 // 文件路径生成

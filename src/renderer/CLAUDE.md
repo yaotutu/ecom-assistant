@@ -18,4 +18,10 @@
 | #4214 | 5:23 PM | 🟣 | Added testCategoryMatch API to PlatformAPI for WeChat category matching by product title | ~363 |
 | #3951 | 11:09 AM | 🟣 | Added new "淘宝浏览器" (Taobao Browser) tab to main application navigation | ~327 |
 | #3950 | " | 🟣 | Added TaobaoBrowser tab component import to App.tsx | ~215 |
+
+### Apr 10, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4419 | 1:54 PM | 🔄 | Restructured application layout from single-pane to sidebar + content layout | ~310 |
 </claude-mem-context>

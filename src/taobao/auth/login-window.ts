@@ -31,7 +31,7 @@ const LOGIN_SUCCESS_URL = 'https://i.taobao.com/my_taobao.htm'
 /**
  * 检测 URL 是否为淘宝登录页面
  */
-const isLoginPage = (url: string): boolean => {
+export const isLoginPage = (url: string): boolean => {
   return url.includes('login.taobao.com') || url.includes('login.tmall.com')
 }
 

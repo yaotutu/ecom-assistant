@@ -1,6 +1,15 @@
 /// <reference types="vite/client" />
 
-/** 连接检测结果 */
+/**
+ * 渲染进程全局类型声明
+ *
+ * 注意：渲染进程无法直接 import 主进程的 core/types.ts（不同打包上下文），
+ * 所以此文件保留前端侧的类型声明。与后端类型的对应关系：
+ * - ConnectionResult  ←→  core/types.ts#ConnectionCheckResult
+ * - Product           ←→  core/types.ts#Product
+ */
+
+/** 连接检测结果（对应后端 ConnectionCheckResult） */
 interface ConnectionResult {
   status: 'checking' | 'connected' | 'disconnected' | 'error'
   message: string
@@ -8,7 +17,7 @@ interface ConnectionResult {
   detail?: string
 }
 
-/** 商品数据 */
+/** 商品数据（对应后端 core/types.ts#Product） */
 interface Product {
   title: string
   itemId: string
@@ -184,8 +193,8 @@ interface PlatformAPI {
     error?: string
   }>
 
-  /** 测试类目匹配（根据标题匹配微信小店类目） */
-  testCategoryMatch(title: string): Promise<{
+  /** 测试类目匹配（映射表优先，标题关键词兜底） */
+  testCategoryMatch(title: string, categoryNames?: string[]): Promise<{
     success: boolean
     data?: {
       matched: boolean
@@ -195,6 +204,7 @@ interface PlatformAPI {
     }
     error?: string
   }>
+
 }
 
 interface Window {

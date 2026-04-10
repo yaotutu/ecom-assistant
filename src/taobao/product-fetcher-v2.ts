@@ -29,32 +29,7 @@ import {
 } from './business/page-extract-scripts'
 import { downloadImages, filterSuccessfulDownloads } from './business/image-downloader'
 import type { TaobaoProductDetail, FetchProductDetailResult, FetchStep, FetchProductDetailOptions } from './types'
-
-// ============================================================
-// 工具函数
-// ============================================================
-
-/** 计时工具 */
-const timed = async <T>(
-  fn: () => Promise<T>
-): Promise<{ result: T; duration: number }> => {
-  const start = Date.now()
-  const result = await fn()
-  return { result, duration: Date.now() - start }
-}
-
-/** 创建成功的步骤记录 */
-const ok = (name: string, duration: number, detail?: string): FetchStep => ({
-  name, success: true, duration, detail,
-})
-
-/** 创建失败的步骤记录 */
-const fail = (name: string, duration: number, error: string): FetchStep => ({
-  name, success: false, duration, detail: error,
-})
-
-/** 等待指定毫秒 */
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+import { sleep, timed, ok, fail } from '../shared/utils'
 
 // ============================================================
 // 全局限流器
