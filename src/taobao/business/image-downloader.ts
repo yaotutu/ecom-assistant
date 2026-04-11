@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { stripSizeSuffix, normalizeImageUrl } from './image-utils'
+import { logger } from '../../shared/logger'
 
 // ============================================================
 // 文件路径生成
@@ -121,7 +122,17 @@ export const downloadImages = async (
   options?: DownloadOptions & { concurrency?: number }
 ): Promise<(string | null)[]> => {
   const concurrency = options?.concurrency ?? 3
+  const prefix = options?.prefix ?? 'img'
+  
+  if (imageUrls.length === 0) {
+    return []
+  }
+  
+  logger.info('[Image]', `⬇️ 开始下载 ${imageUrls.length} 张图片 (并发:${concurrency})`)
+  
   const results: (string | null)[] = new Array(imageUrls.length).fill(null)
+  let completed = 0
+  let failed = 0
 
   // 并发池：最多同时下载 concurrency 个
   const queue = [...imageUrls.map((url, index) => ({ url, index }))]
@@ -132,12 +143,25 @@ export const downloadImages = async (
       while (queue.length > 0) {
         const item = queue.shift()
         if (!item) break
-        results[item.index] = await downloadImage(item.url, options)
+        
+        const result = await downloadImage(item.url, options)
+        results[item.index] = result
+        
+        completed++
+        if (!result) failed++
+        
+        if (completed % 5 === 0 || completed === imageUrls.length) {
+          logger.step('[Image]', completed, imageUrls.length, failed > 0 ? `失败:${failed}` : '下载中...')
+        }
       }
     })())
   }
 
   await Promise.all(workers)
+  
+  const successCount = results.filter(r => r !== null).length
+  logger.info('[Image]', `✅ 图片下载完成: ${successCount}/${imageUrls.length} 成功`)
+  
   return results
 }
 

@@ -12,6 +12,7 @@ import { join } from 'path'
 import { TaobaoPlatform } from '../../taobao'
 import { formatDetailText, formatLinksText } from '../../taobao/business/data-formatter'
 import { checkLoginStatus, showLoginWindow, clearTaobaoSession, getSessionSummary } from '../../taobao/auth'
+import { logger } from '../../shared/logger'
 import type { FilterOptions } from '../../core/types'
 
 const IPC = {
@@ -62,6 +63,8 @@ export function registerTaobaoHandlers(win: BrowserWindow, platform: TaobaoPlatf
       filterOptions: FilterOptions,
       format: 'detail' | 'links'
     ) => {
+      logger.info('[Export]', `💾 导出 ${products.length} 个商品 (${format === 'detail' ? '详情' : '链接'})`)
+      
       try {
         const { canceled, filePaths } = await dialog.showOpenDialog(win, {
           title: '选择导出目录',
@@ -69,6 +72,7 @@ export function registerTaobaoHandlers(win: BrowserWindow, platform: TaobaoPlatf
         })
 
         if (canceled || filePaths.length === 0) {
+          logger.info('[Export]', '❌ 导出已取消')
           return { success: false, error: '已取消' }
         }
 
@@ -89,8 +93,10 @@ export function registerTaobaoHandlers(win: BrowserWindow, platform: TaobaoPlatf
           writeFileSync(filePath, formatLinksText(products), 'utf-8')
         }
 
+        logger.info('[Export]', `✅ 导出成功: ${filePath}`)
         return { success: true, filePath }
       } catch (err: any) {
+        logger.error('[Export]', `❌ 导出失败: ${err.message}`)
         return { success: false, error: err.message }
       }
     }

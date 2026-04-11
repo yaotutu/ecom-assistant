@@ -18,26 +18,22 @@ function createWindow() {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webviewTag: true, // 启用 <webview> 标签（用于淘宝浏览器标签页）
+      webviewTag: true,
     },
   })
 
-  // 开发模式加载 dev server
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // 禁用后台节流 — 窗口在后台时 JS 定时器/滚动不被暂停
   mainWindow.webContents.setBackgroundThrottling(false)
 
-  // WebView 运行在独立进程，也需单独禁用后台节流
   mainWindow.webContents.on('did-attach-webview', (_event, webContents) => {
     webContents.setBackgroundThrottling(false)
   })
 
-  // 注册 IPC handlers
   registerIpcHandlers(mainWindow)
 
   mainWindow.on('closed', () => {

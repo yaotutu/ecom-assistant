@@ -6,6 +6,7 @@ import { NativeCli } from './connection/native-cli'
 import { extractStoresFromApi } from './business/store-search'
 import { extractSalesList } from './business/sales-parser'
 import { buildCollectResult } from './business/product-collector'
+import { logger } from '../shared/logger'
 import type {
   IPlatform,
   ConnectionCheckResult,
@@ -48,10 +49,12 @@ export class TaobaoPlatform implements IPlatform {
   // ─── 搜索店铺 ──────────────────────────────────
 
   async searchStores(keyword: string): Promise<SearchStoresResult> {
-    // 使用 shop 类型搜索店铺（CLI 支持的搜索类型：all/shop/tmall/pc_taobao 等）
+    logger.info('[Store]', `🔍 开始搜索店铺: "${keyword}"`)
+    
     const { apiData } = await this.cli.searchAndWait(keyword, 'shop')
     const stores = extractStoresFromApi(apiData)
-
+    
+    logger.info('[Store]', `✅ 找到 ${stores.length} 家店铺`)
     return { keyword, stores }
   }
 
@@ -61,13 +64,21 @@ export class TaobaoPlatform implements IPlatform {
     storeName: string,
     filterOptions?: FilterOptions
   ): Promise<CollectStoreResult> {
-    const { apiData, pageContent } = await this.cli.searchAndWait(storeName, 'pc_taobao')
+    return logger.timed('[Store]', `采集店铺 "${storeName}"`, async () => {
+      const { apiData, pageContent } = await this.cli.searchAndWait(storeName, 'pc_taobao')
 
-    const r = apiData?.result ?? apiData
-    const apiProducts: any[] = r?.products ?? []
+      const r = apiData?.result ?? apiData
+      const apiProducts: any[] = r?.products ?? []
+      const salesList = extractSalesList(pageContent)
 
-    const salesList = extractSalesList(pageContent)
-
-    return buildCollectResult(storeName, apiProducts, salesList, filterOptions)
+      const result = buildCollectResult(storeName, apiProducts, salesList, filterOptions)
+      
+      logger.stats('[Store]', 
+        { label: '原始商品', value: result.totalCount },
+        { label: '符合过滤', value: result.filteredCount }
+      )
+      
+      return result
+    })
   }
 }

@@ -25,8 +25,9 @@ const TIMEOUT_MS = 120_000
 const PAGE_SLEEP_MS = 2_000
 const HEARTBEAT_DEFAULT_MS = 30_000
 
-const MAX_DETECT_RETRIES = 10
-const RETRY_INTERVAL_MS = 10_000
+const MAX_DETECT_RETRIES = 3
+const RETRY_INTERVAL_MS = 2_000
+const DETECT_TOTAL_TIMEOUT_MS = 10_000  // 硬性总超时 10 秒
 
 // ============================================================
 // 类型
@@ -179,6 +180,7 @@ export class NativeCli {
    */
   startDetection(mainWindow: BrowserWindow): void {
     this.win = mainWindow
+    this.lastMessage = '正在初始化检测...'
 
     // 检测/重试 handler
     ipcMain.handle('platform:check-connection', async () => {
@@ -186,13 +188,13 @@ export class NativeCli {
       if (this.connState === 'healthy') {
         return { status: 'connected', message: this.lastMessage }
       }
-      // 检测进行中：返回 checking
+      // 检测进行中：返回当前检测进度
       if (this.detecting) {
-        return { status: 'checking', message: '正在检测淘宝桌面版连接...' }
+        return { status: 'checking', message: this.lastMessage || '正在检测中...' }
       }
       // 未连接且未检测中：触发重新检测
       this.initialDetection()
-      return { status: 'checking', message: '正在检测淘宝桌面版连接...' }
+      return { status: 'checking', message: this.lastMessage || '开始检测...' }
     })
 
     // 跳过检测 handler
@@ -201,8 +203,8 @@ export class NativeCli {
       return { status: 'connected', message: '已跳过检测（淘宝 CLI 功能不可用）' }
     })
 
-    // 启动初始检测
-    this.initialDetection()
+    // 启动初始检测（异步执行，不阻塞）
+    this.initialDetection().catch(() => { /* ignore */ })
   }
 
   /** 跳过检测，直接标记为已连接（不启动心跳） */
@@ -223,40 +225,64 @@ export class NativeCli {
   }
 
   /**
-   * 初始检测：最多重试 MAX_DETECT_RETRIES 次
+   * 初始检测：最多 10 秒硬性超时
    *
    * 流程：
-   * 1. 检查 CLI 二进制是否存在（只查一次）
-   * 2. 调用 get_current_tab 检测执行层是否就绪
-   * 3. 就绪 → 标记 healthy，启动心跳
-   * 4. 未就绪 → 等 10s 重试，最多 10 次
-   * 5. 全部失败 → 标记 disconnected，提示用户重启
+   * 1. 查找 CLI 路径（最多 3 秒）
+   * 2. 连接检测（最多 7 秒，重试 3 次）
+   * 3. 超时 → 标记 disconnected
    */
   private async initialDetection(): Promise<void> {
+    console.log('[Detection] 开始初始检测')
     this.detecting = true
     this.stopHeartbeat()
+    const detectStartTime = Date.now()
 
-    // 第一步：查找 CLI 路径并解析为绝对路径（只做一次）
+    // 辅助函数：获取剩余秒数
+    const getRemainingSec = () => {
+      const remaining = Math.max(0, DETECT_TOTAL_TIMEOUT_MS - (Date.now() - detectStartTime))
+      return Math.ceil(remaining / 1000)
+    }
+
+    // 辅助函数：检查是否超时
+    const isTimeout = () => Date.now() - detectStartTime >= DETECT_TOTAL_TIMEOUT_MS
+
+    // ===== 第一步：查找 CLI 路径（限时 3 秒） =====
     let cliPath: string
+    this.pushToRenderer('checking', `正在查找淘宝 CLI... (${getRemainingSec()}s)`, undefined, '')
+
     try {
       cliPath = await this.resolveCliPath()
       this.detectCommand = `${cliPath} get_current_tab --args '{"sourceApp":"copaw"}'`
-    } catch {
+      console.log('[Detection] CLI 路径找到:', cliPath)
+    } catch (err: any) {
+      console.log('[Detection] CLI 路径查找失败:', err.message)
       this.detectCommand = ''
       this.transitionTo('disconnected', {
         state: 'disconnected',
-        message: '淘宝桌面版未安装或 CLI 不可用',
-        suggestion: '请确认淘宝桌面版已安装，并重启本工具。',
+        message: '淘宝桌面版未安装',
+        suggestion: '未找到 taobao-native CLI。请安装淘宝桌面版，或点击「跳过检测」进入主界面（淘宝功能将不可用）。',
       })
       this.detecting = false
       return
     }
 
-    this.pushToRenderer('checking', '正在检测淘宝桌面版连接...', undefined, this.detectCommand)
-
-    // 第二步：执行层是否就绪（最多重试 MAX_DETECT_RETRIES 次）
+    // ===== 第二步：连接检测（限时剩余时间） =====
     for (let attempt = 1; attempt <= MAX_DETECT_RETRIES; attempt++) {
-      if (!this.detecting) return // 被中止（用户点击重试）
+      if (!this.detecting) return // 被中止
+      if (isTimeout()) {
+        this.transitionTo('disconnected', {
+          state: 'disconnected',
+          message: '检测超时',
+          suggestion: '淘宝桌面版连接检测超过 10 秒。请确认淘宝桌面版已运行，或点击「跳过检测」。',
+        })
+        this.detecting = false
+        return
+      }
+
+      this.pushToRenderer('checking', 
+        `正在连接淘宝桌面版... 第${attempt}次尝试 (${getRemainingSec()}s)`, 
+        undefined, this.detectCommand)
 
       try {
         const start = Date.now()
@@ -270,23 +296,46 @@ export class NativeCli {
         this.startHeartbeat()
         this.detecting = false
         return
-      } catch {
-        if (attempt < MAX_DETECT_RETRIES && this.detecting) {
-          this.pushToRenderer('checking',
-            `正在等待淘宝桌面版启动... (${attempt}/${MAX_DETECT_RETRIES})`,
+      } catch (err: any) {
+        const errMsg = err.message || ''
+        
+        // CLI 不存在，直接失败
+        if (/ENOENT|not found|spawn|UNKNOWN|未找到 CLI/i.test(errMsg)) {
+          this.transitionTo('disconnected', {
+            state: 'disconnected',
+            message: '淘宝桌面版未安装',
+            suggestion: 'CLI 不可用。请安装淘宝桌面版，或点击「跳过检测」。',
+          })
+          this.detecting = false
+          return
+        }
+
+        // 检查是否还有重试机会和时间
+        if (attempt < MAX_DETECT_RETRIES && !isTimeout() && this.detecting) {
+          this.pushToRenderer('checking', 
+            `连接失败，${RETRY_INTERVAL_MS/1000}秒后重试... (${getRemainingSec()}s)`, 
             undefined, this.detectCommand)
           await sleep(RETRY_INTERVAL_MS)
         }
       }
     }
 
-    // 所有重试均失败
+    // 所有重试均失败或超时
     if (!this.detecting) return
-    this.transitionTo('disconnected', {
-      state: 'disconnected',
-      message: '淘宝桌面版连接失败，请重启淘宝桌面版',
-      suggestion: '请重启淘宝桌面版，然后点击「重新检测」。',
-    })
+    
+    if (isTimeout()) {
+      this.transitionTo('disconnected', {
+        state: 'disconnected',
+        message: '检测超时',
+        suggestion: '淘宝桌面版连接检测超过 10 秒。请确认淘宝桌面版已运行，或点击「跳过检测」。',
+      })
+    } else {
+      this.transitionTo('disconnected', {
+        state: 'disconnected',
+        message: '淘宝桌面版未运行',
+        suggestion: '无法连接到淘宝桌面版。请打开淘宝桌面版后点击「重新检测」，或点击「跳过检测」。',
+      })
+    }
     this.detecting = false
   }
 
@@ -402,20 +451,59 @@ export class NativeCli {
    * 遍历候选路径列表，返回第一个可用的完整路径
    */
   private async resolveCliPath(): Promise<string> {
+    console.log('[CLI] 开始查找路径，候选列表:', this.cliPaths)
+    
     for (const cliPath of this.cliPaths) {
+      console.log(`[CLI] 尝试路径: ${cliPath}`)
       try {
         await new Promise<void>((resolve, reject) => {
-          execFile(cliPath, ['--help'], { timeout: 10_000 }, (error) => {
-            if (error) reject(error)
-            else resolve()
+          // Windows 上 .cmd 文件需要 shell: true
+          const isCmd = process.platform === 'win32' && cliPath.endsWith('.cmd')
+          const options: any = { timeout: 3_000 }
+          if (isCmd) {
+            options.shell = true
+            console.log(`[CLI] ${cliPath} 使用 shell 模式`)
+          }
+          
+          execFile(cliPath, ['--help'], options, (error) => {
+            if (error) {
+              console.log(`[CLI] ${cliPath} --help 失败:`, error.message)
+              reject(error)
+            } else {
+              console.log(`[CLI] ${cliPath} --help 成功`)
+              resolve()
+            }
           })
         })
         // 已是绝对路径（Unix /开头 或 Windows 盘符开头），直接返回
-        if (cliPath.startsWith('/') || /^[A-Z]:/i.test(cliPath)) return cliPath
+        if (cliPath.startsWith('/') || /^[A-Z]:/i.test(cliPath)) {
+          console.log(`[CLI] 返回绝对路径: ${cliPath}`)
+          return cliPath
+        }
         // 相对路径（如 taobao-native）：通过 which/where 解析完整路径
-        return await this.whichResolve(cliPath)
+        const resolvedPath = await this.whichResolve(cliPath)
+        console.log(`[CLI] which/where 解析结果: ${resolvedPath}`)
+        return resolvedPath
       } catch (err: any) {
-        if (!/ENOENT|not found|spawn/i.test(err.message)) break
+        // CLI 不存在或无法执行，继续尝试下一个路径
+        const msg = err.message || ''
+        console.log(`[CLI] ${cliPath} 错误:`, msg)
+        
+        // 扩展错误匹配：支持中英文 Windows 错误消息
+        const isNotFound = /ENOENT|not found|spawn|UNKNOWN|cannot find/i.test(msg) ||
+                           /不是内部或外部命令|不是内部或外部命令|系统找不到|无法找到/i.test(msg) ||
+                           msg.includes('code ENOENT') ||
+                           msg.includes('spawn ENOENT') ||
+                           (process.platform === 'win32' && msg.includes('Error: spawn'))
+        
+        if (isNotFound) {
+          console.log(`[CLI] ${cliPath} 不存在，尝试下一个`)
+          continue  // 路径不存在，继续尝试下一个
+        }
+        
+        // 其他错误（如权限问题），终止尝试
+        console.log(`[CLI] ${cliPath} 遇到非"不存在"错误，终止查找`)
+        break
       }
     }
     throw new Error('未找到 CLI')
@@ -442,7 +530,12 @@ export class NativeCli {
       this.cliPaths,
       (cliPath) =>
         new Promise((resolve, reject) => {
-          execFile(cliPath, ['--help'], { timeout: 10_000 }, (error) => {
+          // Windows 上 .cmd 文件需要 shell: true
+          const isCmd = process.platform === 'win32' && cliPath.endsWith('.cmd')
+          const options: any = { timeout: 10_000 }
+          if (isCmd) options.shell = true
+          
+          execFile(cliPath, ['--help'], options, (error) => {
             if (error) reject(error)
             else resolve(undefined)
           })
@@ -456,7 +549,12 @@ export class NativeCli {
       (cliPath) =>
         new Promise((resolve, reject) => {
           const args = ['get_current_tab', '--args', JSON.stringify({ sourceApp: SOURCE_APP })]
-          execFile(cliPath, args, { timeout: 10_000 }, (error, stdout, stderr) => {
+          // Windows 上 .cmd 文件需要 shell: true
+          const isCmd = process.platform === 'win32' && cliPath.endsWith('.cmd')
+          const options: any = { timeout: 5_000 }
+          if (isCmd) options.shell = true
+          
+          execFile(cliPath, args, options, (error, stdout, stderr) => {
             if (error) {
               const extracted = extractCliError(error, stdout, stderr)
               reject(extracted ?? error)
@@ -508,10 +606,15 @@ export class NativeCli {
     outputFile?: string
   ): Promise<any> {
     return new Promise((resolve, reject) => {
+      // Windows 上 .cmd 文件需要 shell: true
+      const isCmd = process.platform === 'win32' && cmd.endsWith('.cmd')
+      const options: any = { timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 }
+      if (isCmd) options.shell = true
+      
       execFile(
         cmd,
         argArray,
-        { timeout: TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+        options,
         async (error, stdout, stderr) => {
           if (error) {
             const extracted = extractCliError(error, stdout, stderr)

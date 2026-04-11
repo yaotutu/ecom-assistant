@@ -46,6 +46,7 @@ import {
   getAfterSaleAddresses,
 } from './api-client'
 import { timed, ok, fail } from '../shared/utils'
+import { logger } from '../shared/logger'
 
 // ============================================================
 // 图片批量上传
@@ -230,25 +231,36 @@ export const listProductToStore = async (
   input: ProductInput,
   options?: ListProductOptions
 ): Promise<ListProductResult> => {
+  logger.info('[Wechat]', `🛒 开始上货: "${input.title}"`)
+  logger.info('[Wechat]', `📋 主图:${input.headImagePaths.length}张 详情图:${input.descImagePaths.length}张 SKU:${input.skus.length}个`)
+  
   const steps: ListProductStep[] = []
   const pushStep = (step: ListProductStep) => steps.push(step)
 
   try {
     // ---- 步骤 1：上传主图 ----
+    logger.info('[Wechat]', '⬆️ 上传主图...')
     const { result: headImgUploaded } = await timed(() =>
       uploadImages(accessToken, input.headImagePaths, '上传主图')
     )
     const headImgUrls = headImgUploaded.urls
     headImgUploaded.steps.forEach(pushStep)
+    logger.info('[Wechat]', `✅ 主图上传完成: ${headImgUrls.length}张`)
 
     // ---- 步骤 2：上传详情图 ----
+    logger.info('[Wechat]', '⬆️ 上传详情图...')
     const { result: descImgUploaded } = await timed(() =>
       uploadImages(accessToken, input.descImagePaths, '上传详情图')
     )
     const descImgUrls = descImgUploaded.urls
     descImgUploaded.steps.forEach(pushStep)
+    logger.info('[Wechat]', `✅ 详情图上传完成: ${descImgUrls.length}张`)
 
     // ---- 步骤 3：上传 SKU 小图（有图片的 SKU 才上传） ----
+    const skuWithImages = input.skus.filter(s => s.imagePath).length
+    if (skuWithImages > 0) {
+      logger.info('[Wechat]', `⬆️ 上传 SKU 图片 (${skuWithImages}个)...`)
+    }
     const skuImgUrls: Record<number, string> = {}
     for (let i = 0; i < input.skus.length; i++) {
       const sku = input.skus[i]
@@ -264,6 +276,7 @@ export const listProductToStore = async (
     // ---- 步骤 4：获取售后地址（如未指定） ----
     let afterSaleAddressId = input.afterSaleAddressId
     if (!afterSaleAddressId) {
+      logger.info('[Wechat]', '🔍 获取售后地址...')
       const { result: addresses, duration } = await timed(() =>
         getAfterSaleAddresses(accessToken)
       )
@@ -272,9 +285,11 @@ export const listProductToStore = async (
       }
       afterSaleAddressId = Number(addresses[0])
       pushStep(ok('获取售后地址', duration, `使用地址 ID: ${afterSaleAddressId}`))
+      logger.info('[Wechat]', `✅ 使用售后地址: ${afterSaleAddressId}`)
     }
 
     // ---- 步骤 5：构建请求体 ----
+    logger.info('[Wechat]', '📝 构建请求体...')
     const requestBody = buildProductRequest(input, {
       headImgUrls,
       descImgUrls,
@@ -284,21 +299,26 @@ export const listProductToStore = async (
     pushStep(ok('构建请求体', 0))
 
     // ---- 步骤 6：提交添加商品 ----
+    logger.info('[Wechat]', '🚀 提交添加商品...')
     const { result: addResult, duration: addDuration } = await timed(() =>
       addProduct(accessToken, requestBody)
     )
     pushStep(ok('添加商品', addDuration, `product_id: ${addResult.product_id}`))
+    logger.info('[Wechat]', `✅ 商品创建成功: ${addResult.product_id}`)
 
     // ---- 步骤 7：可选 - 提交审核上架 ----
     let listed = false
     if (options?.autoList) {
+      logger.info('[Wechat]', '📤 提交上架审核...')
       const { duration: listDuration } = await timed(() =>
         listProduct(accessToken, addResult.product_id)
       )
       listed = true
       pushStep(ok('提交上架审核', listDuration))
+      logger.info('[Wechat]', '✅ 上架审核已提交')
     }
 
+    logger.info('[Wechat]', `🎉 上货完成! 商品ID: ${addResult.product_id}`)
     return {
       success: true,
       productId: addResult.product_id,
@@ -310,6 +330,7 @@ export const listProductToStore = async (
     // 捕获异常，返回失败结果
     const errorMsg = err instanceof Error ? err.message : String(err)
     pushStep(fail('上货流程', 0, errorMsg))
+    logger.error('[Wechat]', `❌ 上货失败: ${errorMsg}`)
 
     return {
       success: false,

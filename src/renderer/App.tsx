@@ -56,7 +56,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('collect')
   const [connection, setConnection] = useState<ConnectionState>({
     status: 'checking',
-    message: '正在检测淘宝桌面版连接...',
+    message: '初始化中，请稍候...',
   })
   const [detectCommand, setDetectCommand] = useState('')
   const [copied, setCopied] = useState(false)
